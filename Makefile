@@ -3,7 +3,7 @@ BUILD_DIR := build
 COMMON_WARNINGS := -Wall -Wextra
 OBJC_ARC := -fobjc-arc
 INCLUDES := -Iinclude
-APPLECVA_FRAMEWORKS := -framework Foundation -framework Vision -framework CoreFoundation -framework CoreGraphics -framework CoreVideo -framework ImageIO
+APPLECVA_FRAMEWORKS := -framework Foundation -framework Vision -framework CoreFoundation -framework CoreGraphics -framework CoreVideo -framework CoreMedia -framework ImageIO
 CAMERA_VIEWER_FRAMEWORKS := $(APPLECVA_FRAMEWORKS) -framework AppKit -framework AVFoundation -framework CoreMedia -framework CoreImage -framework QuartzCore
 
 LIB_TARGET := $(BUILD_DIR)/libapplecva.dylib

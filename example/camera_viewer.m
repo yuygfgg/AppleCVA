@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -107,6 +108,18 @@ static bool tracked_face_is_stable(const AppleCVATrackedFace *face) {
 static NSString *status_string_for_code(int32_t status) {
     return [NSString
         stringWithFormat:@"%s (%d)", AppleCVAStatusString(status), status];
+}
+
+static size_t configured_vision_detection_interval(void) {
+    const char *value = getenv("APPLECVA_VISION_INTERVAL");
+    if (value != NULL && value[0] != '\0') {
+        char *end = NULL;
+        const unsigned long parsed = strtoul(value, &end, 10);
+        if (end != value && parsed > 0) {
+            return (size_t)parsed;
+        }
+    }
+    return getenv("APPLECVA_FULL_API") != NULL ? 6 : kVisionDetectionInterval;
 }
 
 @interface FaceOverlayView : NSView
@@ -612,6 +625,7 @@ static NSString *status_string_for_code(int32_t status) {
     AppleCVAConfig config;
     AppleCVAConfigInit(&config);
     config.enable_rgb_fallback_conversion = true;
+    config.use_full_api = (getenv("APPLECVA_FULL_API") != NULL);
     return AppleCVATrackerCreate(&config, &_tracker);
 }
 
@@ -724,8 +738,8 @@ static NSString *status_string_for_code(int32_t status) {
         _detectedFaceCount = 0;
     }
 
-    if ((_frameIndex % kVisionDetectionInterval) == 0 ||
-        _detectedFaceCount == 0) {
+    const size_t detectionInterval = configured_vision_detection_interval();
+    if ((_frameIndex % detectionInterval) == 0 || _detectedFaceCount == 0) {
         size_t detectedFaceCount = 0;
         const int32_t detectStatus = AppleCVADetectFacesWithVisionOrientation(
             pixelBuffer, kVisionOrientation, _detectedFaces,

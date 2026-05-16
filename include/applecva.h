@@ -84,12 +84,12 @@ static const char* const AppleCVALandmarkNames[APPLECVA_MAX_LANDMARKS] = {
     "CheekLeft3",          "CheekLeft4",          "CheekLeft5",
 };
 
-/** Opaque stateful AppleCVA Lite tracker wrapper. */
+/** Opaque stateful AppleCVA tracker wrapper. */
 typedef struct AppleCVATracker AppleCVATracker;
 
 /** Tracker configuration used at creation time. */
 typedef struct {
-    /** Use AppleCVA feature create-options instead of the default options blob. */
+    /** Use Lite feature create-options instead of the default Lite options blob. */
     bool use_feature_options;
     /** Convert packed RGB formats to NV12 internally when needed. */
     bool enable_rgb_fallback_conversion;
@@ -99,9 +99,11 @@ typedef struct {
     float focal_scale;
     /** Lux value passed when per-frame lux is zero. */
     uint32_t default_lux_level;
+    /** Use the NSDictionary-based full AppleCVA face tracking backend. */
+    bool use_full_api;
 } AppleCVAConfig;
 
-/** Input face rectangle for CVAFaceTrackingLiteSetDetectedFaces. */
+/** Input face rectangle for AppleCVATrackerProcessFrame. */
 typedef struct {
     /** Normalized bottom-left X. */
     float x;
@@ -176,7 +178,7 @@ typedef struct {
     double timestamp_seconds;
 } AppleCVAFrameResult;
 
-/** Static semantics returned by the full AppleCVA framework. */
+/** Static semantics returned by the AppleCVA framework. */
 typedef struct {
     bool valid;
     uint32_t maximum_tracked_faces;
@@ -222,7 +224,7 @@ uint32_t AppleCVAMaximumTrackedFaces(void);
 /** Copy blendshape names, landmark names, and template mesh semantics from AppleCVA. */
 int32_t AppleCVACopySemantics(AppleCVASemantics* out_semantics);
 
-/** Create a stateful AppleCVA tracker. */
+/** Create a stateful AppleCVA tracker using the configured backend. */
 int32_t AppleCVATrackerCreate(const AppleCVAConfig* config,
                               AppleCVATracker** out_tracker);
 
@@ -243,6 +245,8 @@ int32_t AppleCVATrackerCopyRawDecodedOutput(AppleCVATracker* tracker,
  *
  * `pixel_buffer` may be NV12 (`420f` or `420v`). Packed BGRA, ARGB, and RGBA
  * are accepted when fallback conversion is enabled in AppleCVAConfig.
+ * `detected_faces` are normalized bottom-left rectangles; the full backend
+ * converts them to its required input coordinate convention internally.
  */
 int32_t AppleCVATrackerProcessFrame(
     AppleCVATracker* tracker, CVPixelBufferRef pixel_buffer,
