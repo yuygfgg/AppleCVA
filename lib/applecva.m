@@ -11,7 +11,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define APPLECVA_FRAMEWORK_PATH                                                \
+    "/System/Library/PrivateFrameworks/AppleCVA.framework/Versions/A/AppleCVA"
+
+#define APPLECVA_ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
+#define APPLECVA_LITE_STACK_FACE_CAPACITY 8
 #define APPLECVA_FULL_MAX_INPUT_FACES 8
+#define APPLECVA_FULL_CALLBACK_TIMEOUT_NS NSEC_PER_SEC
+#define APPLECVA_FULL_FACE_DEFAULT_SMOOTHING 0.25f
+#define APPLECVA_FULL_FACE_DEFAULT_HOLD_FRAMES 15
+#define APPLECVA_FULL_FACE_MATCH_DISTANCE2 0.08f
 
 typedef const struct __CVAFaceTrackingLite *CVAFaceTrackingLiteRef;
 typedef const struct __CVAFaceTracking *CVAFaceTrackingRef;
@@ -121,6 +130,17 @@ typedef struct {
     AppleCVAFullKeys keys;
 } AppleCVAFullAPI;
 
+typedef struct {
+    const char *name;
+    void **slot;
+} AppleCVASymbolSpec;
+
+typedef struct {
+    const char *name;
+    CFStringRef *slot;
+    bool required;
+} AppleCVAKeySpec;
+
 struct AppleCVATracker {
     AppleCVALiteAPI api;
     AppleCVAFullAPI full_api;
@@ -137,11 +157,6 @@ struct AppleCVATracker {
     OSType scratch_format;
 };
 
-static bool bind_symbol(void *handle, const char *name, void **out) {
-    *out = dlsym(handle, name);
-    return (*out != NULL);
-}
-
 static CFStringRef key_from_symbol(void *handle, const char *name) {
     CFStringRef *slot = (CFStringRef *)dlsym(handle, name);
     if (slot != NULL && *slot != NULL &&
@@ -152,6 +167,40 @@ static CFStringRef key_from_symbol(void *handle, const char *name) {
 }
 
 static NSString *ns_key(CFStringRef key) { return (__bridge NSString *)key; }
+
+static void *open_applecva_framework(void) {
+    return dlopen(APPLECVA_FRAMEWORK_PATH, RTLD_NOW);
+}
+
+static void close_framework_handle(void **handle) {
+    if (handle != NULL && *handle != NULL) {
+        dlclose(*handle);
+        *handle = NULL;
+    }
+}
+
+static bool bind_symbols(void *handle, const AppleCVASymbolSpec *symbols,
+                         size_t symbol_count) {
+    for (size_t i = 0; i < symbol_count; ++i) {
+        *symbols[i].slot = dlsym(handle, symbols[i].name);
+        if (*symbols[i].slot == NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool bind_cfstring_keys(void *handle, const AppleCVAKeySpec *keys,
+                               size_t key_count) {
+    bool ok = true;
+    for (size_t i = 0; i < key_count; ++i) {
+        *keys[i].slot = key_from_symbol(handle, keys[i].name);
+        if (keys[i].required && *keys[i].slot == NULL) {
+            ok = false;
+        }
+    }
+    return ok;
+}
 
 static bool trace_enabled(void) {
     static int cached = -1;
@@ -175,117 +224,146 @@ static void trace_log(const char *format, ...) {
 
 static bool load_api(AppleCVALiteAPI *api) {
     memset(api, 0, sizeof(*api));
-    api->handle = dlopen("/System/Library/PrivateFrameworks/AppleCVA.framework/"
-                         "Versions/A/AppleCVA",
-                         RTLD_NOW);
+    api->handle = open_applecva_framework();
     if (api->handle == NULL) {
         return false;
     }
-    return bind_symbol(api->handle, "CVAFaceTrackingLiteGetAPIVersion",
-                       (void **)&api->get_api_version) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteGetTypeID",
-                       (void **)&api->get_type_id) &&
-           bind_symbol(api->handle,
-                       "CVAFaceTrackingLiteGetDefaultCreateOptions",
-                       (void **)&api->get_default_create_options) &&
-           bind_symbol(api->handle,
-                       "CVAFaceTrackingLiteGetCreateOptionsForFeatures",
-                       (void **)&api->get_create_options_for_features) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteCreate",
-                       (void **)&api->create) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteSetTimestamp",
-                       (void **)&api->set_timestamp) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteSetLuxLevel",
-                       (void **)&api->set_lux_level) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteSetColorImage",
-                       (void **)&api->set_color_image) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteSetDetectedFaces",
-                       (void **)&api->set_detected_faces) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteProcess",
-                       (void **)&api->process) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteGetOutput",
-                       (void **)&api->get_output) &&
-           bind_symbol(api->handle, "CVAFaceTrackingLiteCopyDecodedOutput",
-                       (void **)&api->copy_decoded_output) &&
-           bind_symbol(api->handle, "CVAFaceTrackingCopySemantics",
-                       (void **)&api->copy_semantics) &&
-           bind_symbol(api->handle,
-                       "CVAFaceTrackingMaximumNumberOfTrackedFaces",
-                       (void **)&api->maximum_number_of_tracked_faces);
+
+#define APPLECVA_LITE_SYMBOL(field, symbol_name)                               \
+    {                                                                          \
+        symbol_name, (void **)&api->field                                      \
+    }
+
+    const AppleCVASymbolSpec symbols[] = {
+        APPLECVA_LITE_SYMBOL(get_api_version,
+                             "CVAFaceTrackingLiteGetAPIVersion"),
+        APPLECVA_LITE_SYMBOL(get_type_id, "CVAFaceTrackingLiteGetTypeID"),
+        APPLECVA_LITE_SYMBOL(get_default_create_options,
+                             "CVAFaceTrackingLiteGetDefaultCreateOptions"),
+        APPLECVA_LITE_SYMBOL(get_create_options_for_features,
+                             "CVAFaceTrackingLiteGetCreateOptionsForFeatures"),
+        APPLECVA_LITE_SYMBOL(create, "CVAFaceTrackingLiteCreate"),
+        APPLECVA_LITE_SYMBOL(set_timestamp, "CVAFaceTrackingLiteSetTimestamp"),
+        APPLECVA_LITE_SYMBOL(set_lux_level, "CVAFaceTrackingLiteSetLuxLevel"),
+        APPLECVA_LITE_SYMBOL(set_color_image,
+                             "CVAFaceTrackingLiteSetColorImage"),
+        APPLECVA_LITE_SYMBOL(set_detected_faces,
+                             "CVAFaceTrackingLiteSetDetectedFaces"),
+        APPLECVA_LITE_SYMBOL(process, "CVAFaceTrackingLiteProcess"),
+        APPLECVA_LITE_SYMBOL(get_output, "CVAFaceTrackingLiteGetOutput"),
+        APPLECVA_LITE_SYMBOL(copy_decoded_output,
+                             "CVAFaceTrackingLiteCopyDecodedOutput"),
+        APPLECVA_LITE_SYMBOL(copy_semantics, "CVAFaceTrackingCopySemantics"),
+        APPLECVA_LITE_SYMBOL(maximum_number_of_tracked_faces,
+                             "CVAFaceTrackingMaximumNumberOfTrackedFaces"),
+    };
+#undef APPLECVA_LITE_SYMBOL
+
+    if (!bind_symbols(api->handle, symbols, APPLECVA_ARRAY_COUNT(symbols))) {
+        close_framework_handle(&api->handle);
+        memset(api, 0, sizeof(*api));
+        return false;
+    }
+    return true;
 }
 
 static void unload_api(AppleCVALiteAPI *api) {
-    if (api->handle != NULL) {
-        dlclose(api->handle);
-        api->handle = NULL;
-    }
+    close_framework_handle(&api->handle);
+    memset(api, 0, sizeof(*api));
 }
 
 static bool load_full_keys(AppleCVAFullAPI *api) {
     AppleCVAFullKeys *keys = &api->keys;
     memset(keys, 0, sizeof(*keys));
-    keys->robust_tongue =
-        key_from_symbol(api->handle, "kCVAFaceTracking_RobustTongue");
-    keys->use_tongue =
-        key_from_symbol(api->handle, "kCVAFaceTracking_UseTongue");
-#define LOAD_FULL_KEY(field, symbol)                                           \
-    ((keys->field = key_from_symbol(api->handle, symbol)) != NULL)
-    return LOAD_FULL_KEY(add_keypoints, "kCVAFaceTracking_AddKeyPoints") &&
-           LOAD_FULL_KEY(add_mesh, "kCVAFaceTracking_AddMesh") &&
-           LOAD_FULL_KEY(callback, "kCVAFaceTracking_Callback") &&
-           LOAD_FULL_KEY(color, "kCVAFaceTracking_Color") &&
-           LOAD_FULL_KEY(color_meta_data, "kCVAFaceTracking_ColorMetaData") &&
-           LOAD_FULL_KEY(color_only, "kCVAFaceTracking_ColorOnly") &&
-           LOAD_FULL_KEY(camera_color, "kCVAFaceTracking_CameraColor") &&
-           LOAD_FULL_KEY(detected_face_angle_roll,
-                         "kCVAFaceTracking_DetectedFaceAngleInfoRoll") &&
-           LOAD_FULL_KEY(detected_face_face_id,
-                         "kCVAFaceTracking_DetectedFaceFaceID") &&
-           LOAD_FULL_KEY(detected_face_rect,
-                         "kCVAFaceTracking_DetectedFaceRect") &&
-           LOAD_FULL_KEY(detected_faces_array,
-                         "kCVAFaceTracking_DetectedFacesArray") &&
-           LOAD_FULL_KEY(extrinsics, "kCVAFaceTracking_Extrinsics") &&
-           LOAD_FULL_KEY(fitting_enabled, "kCVAFaceTracking_FittingEnabled") &&
-           LOAD_FULL_KEY(force_cpu, "kCVAFaceTracking_ForceCPU") &&
-           LOAD_FULL_KEY(intrinsics, "kCVAFaceTracking_Intrinsics") &&
-           LOAD_FULL_KEY(lux_level, "kCVAFaceTracking_LuxLevel") &&
-           LOAD_FULL_KEY(meta, "kCVAFaceTracking_Meta") &&
-           LOAD_FULL_KEY(meta_version, "kCVAFaceTracking_MetaVersion") &&
-           LOAD_FULL_KEY(
-               network_failure_threshold_multiplier,
-               "kCVAFaceTracking_NetworkFailureThresholdMultiplier") &&
-           LOAD_FULL_KEY(num_tracked_faces,
-                         "kCVAFaceTracking_NumTrackedFaces") &&
-           LOAD_FULL_KEY(rotation, "kCVAFaceTracking_Rotation") &&
-           LOAD_FULL_KEY(timestamp, "kCVAFaceTracking_Timestamp") &&
-           LOAD_FULL_KEY(translation, "kCVAFaceTracking_Translation") &&
-           LOAD_FULL_KEY(use_face_detector, "kCVAFaceTracking_UseFaceDetector");
-#undef LOAD_FULL_KEY
+
+#define APPLECVA_REQUIRED_FULL_KEY(field, symbol_name)                         \
+    {symbol_name, &keys->field, true}
+#define APPLECVA_OPTIONAL_FULL_KEY(field, symbol_name)                         \
+    {                                                                          \
+        symbol_name, &keys->field, false                                       \
+    }
+
+    const AppleCVAKeySpec key_specs[] = {
+        APPLECVA_REQUIRED_FULL_KEY(add_keypoints,
+                                   "kCVAFaceTracking_AddKeyPoints"),
+        APPLECVA_REQUIRED_FULL_KEY(add_mesh, "kCVAFaceTracking_AddMesh"),
+        APPLECVA_REQUIRED_FULL_KEY(callback, "kCVAFaceTracking_Callback"),
+        APPLECVA_REQUIRED_FULL_KEY(color, "kCVAFaceTracking_Color"),
+        APPLECVA_REQUIRED_FULL_KEY(color_meta_data,
+                                   "kCVAFaceTracking_ColorMetaData"),
+        APPLECVA_REQUIRED_FULL_KEY(color_only, "kCVAFaceTracking_ColorOnly"),
+        APPLECVA_REQUIRED_FULL_KEY(camera_color,
+                                   "kCVAFaceTracking_CameraColor"),
+        APPLECVA_REQUIRED_FULL_KEY(
+            detected_face_angle_roll,
+            "kCVAFaceTracking_DetectedFaceAngleInfoRoll"),
+        APPLECVA_REQUIRED_FULL_KEY(detected_face_face_id,
+                                   "kCVAFaceTracking_DetectedFaceFaceID"),
+        APPLECVA_REQUIRED_FULL_KEY(detected_face_rect,
+                                   "kCVAFaceTracking_DetectedFaceRect"),
+        APPLECVA_REQUIRED_FULL_KEY(detected_faces_array,
+                                   "kCVAFaceTracking_DetectedFacesArray"),
+        APPLECVA_REQUIRED_FULL_KEY(extrinsics, "kCVAFaceTracking_Extrinsics"),
+        APPLECVA_REQUIRED_FULL_KEY(fitting_enabled,
+                                   "kCVAFaceTracking_FittingEnabled"),
+        APPLECVA_REQUIRED_FULL_KEY(force_cpu, "kCVAFaceTracking_ForceCPU"),
+        APPLECVA_REQUIRED_FULL_KEY(intrinsics, "kCVAFaceTracking_Intrinsics"),
+        APPLECVA_REQUIRED_FULL_KEY(lux_level, "kCVAFaceTracking_LuxLevel"),
+        APPLECVA_REQUIRED_FULL_KEY(meta, "kCVAFaceTracking_Meta"),
+        APPLECVA_REQUIRED_FULL_KEY(meta_version,
+                                   "kCVAFaceTracking_MetaVersion"),
+        APPLECVA_REQUIRED_FULL_KEY(
+            network_failure_threshold_multiplier,
+            "kCVAFaceTracking_NetworkFailureThresholdMultiplier"),
+        APPLECVA_REQUIRED_FULL_KEY(num_tracked_faces,
+                                   "kCVAFaceTracking_NumTrackedFaces"),
+        APPLECVA_REQUIRED_FULL_KEY(rotation, "kCVAFaceTracking_Rotation"),
+        APPLECVA_REQUIRED_FULL_KEY(timestamp, "kCVAFaceTracking_Timestamp"),
+        APPLECVA_REQUIRED_FULL_KEY(translation, "kCVAFaceTracking_Translation"),
+        APPLECVA_REQUIRED_FULL_KEY(use_face_detector,
+                                   "kCVAFaceTracking_UseFaceDetector"),
+        APPLECVA_OPTIONAL_FULL_KEY(robust_tongue,
+                                   "kCVAFaceTracking_RobustTongue"),
+        APPLECVA_OPTIONAL_FULL_KEY(use_tongue, "kCVAFaceTracking_UseTongue"),
+    };
+#undef APPLECVA_OPTIONAL_FULL_KEY
+#undef APPLECVA_REQUIRED_FULL_KEY
+
+    return bind_cfstring_keys(api->handle, key_specs,
+                              APPLECVA_ARRAY_COUNT(key_specs));
 }
 
 static bool load_full_api(AppleCVAFullAPI *api) {
     memset(api, 0, sizeof(*api));
-    api->handle = dlopen("/System/Library/PrivateFrameworks/AppleCVA.framework/"
-                         "Versions/A/AppleCVA",
-                         RTLD_NOW);
+    api->handle = open_applecva_framework();
     if (api->handle == NULL) {
         return false;
     }
-    const bool ok = bind_symbol(api->handle, "CVAFaceTrackingGetAPIVersion",
-                                (void **)&api->get_api_version) &&
-                    bind_symbol(api->handle, "CVAFaceTrackingCreate",
-                                (void **)&api->create) &&
-                    bind_symbol(api->handle, "CVAFaceTrackingProcess",
-                                (void **)&api->process);
-    return ok && load_full_keys(api);
+
+#define APPLECVA_FULL_SYMBOL(field, symbol_name)                               \
+    {                                                                          \
+        symbol_name, (void **)&api->field                                      \
+    }
+
+    const AppleCVASymbolSpec symbols[] = {
+        APPLECVA_FULL_SYMBOL(get_api_version, "CVAFaceTrackingGetAPIVersion"),
+        APPLECVA_FULL_SYMBOL(create, "CVAFaceTrackingCreate"),
+        APPLECVA_FULL_SYMBOL(process, "CVAFaceTrackingProcess"),
+    };
+#undef APPLECVA_FULL_SYMBOL
+
+    if (!bind_symbols(api->handle, symbols, APPLECVA_ARRAY_COUNT(symbols)) ||
+        !load_full_keys(api)) {
+        close_framework_handle(&api->handle);
+        memset(api, 0, sizeof(*api));
+        return false;
+    }
+    return true;
 }
 
 static void unload_full_api(AppleCVAFullAPI *api) {
-    if (api->handle != NULL) {
-        dlclose(api->handle);
-        api->handle = NULL;
-    }
+    close_framework_handle(&api->handle);
+    memset(api, 0, sizeof(*api));
 }
 
 static uint8_t clamp_u8(float value) {
@@ -296,6 +374,86 @@ static uint8_t clamp_u8(float value) {
         return 255;
     }
     return (uint8_t)(value + 0.5f);
+}
+
+typedef struct {
+    float r;
+    float g;
+    float b;
+} AppleCVARGB;
+
+typedef struct {
+    CVPixelBufferRef buffer;
+    CVPixelBufferLockFlags flags;
+    bool locked;
+} AppleCVAPixelBufferLock;
+
+static bool pixel_buffer_lock(AppleCVAPixelBufferLock *lock,
+                              CVPixelBufferRef buffer,
+                              CVPixelBufferLockFlags flags) {
+    lock->buffer = buffer;
+    lock->flags = flags;
+    lock->locked =
+        (CVPixelBufferLockBaseAddress(buffer, flags) == kCVReturnSuccess);
+    return lock->locked;
+}
+
+static void pixel_buffer_unlock(AppleCVAPixelBufferLock *lock) {
+    if (lock->locked) {
+        CVPixelBufferUnlockBaseAddress(lock->buffer, lock->flags);
+        lock->locked = false;
+    }
+}
+
+static AppleCVARGB make_rgb(float r, float g, float b) {
+    AppleCVARGB rgb = {r, g, b};
+    return rgb;
+}
+
+static AppleCVARGB rgb_from_packed_pixel(const uint8_t *pixel, OSType format) {
+    switch (format) {
+    case kCVPixelFormatType_32BGRA:
+        return make_rgb((float)pixel[2], (float)pixel[1], (float)pixel[0]);
+    case kCVPixelFormatType_32ARGB:
+        return make_rgb((float)pixel[1], (float)pixel[2], (float)pixel[3]);
+    case kCVPixelFormatType_32RGBA:
+        return make_rgb((float)pixel[0], (float)pixel[1], (float)pixel[2]);
+    default:
+        return make_rgb(0.0f, 0.0f, 0.0f);
+    }
+}
+
+static AppleCVARGB average_rgb4(AppleCVARGB a, AppleCVARGB b, AppleCVARGB c,
+                                AppleCVARGB d) {
+    return make_rgb((a.r + b.r + c.r + d.r) * 0.25f,
+                    (a.g + b.g + c.g + d.g) * 0.25f,
+                    (a.b + b.b + c.b + d.b) * 0.25f);
+}
+
+static float rgb_to_luma(AppleCVARGB rgb, bool full_range) {
+    if (full_range) {
+        return (0.2990f * rgb.r) + (0.5870f * rgb.g) + (0.1140f * rgb.b);
+    }
+    return 16.0f +
+           ((65.481f * rgb.r) + (128.553f * rgb.g) + (24.966f * rgb.b)) /
+               255.0f;
+}
+
+static void rgb_to_chroma(AppleCVARGB rgb, bool full_range, float *out_cb,
+                          float *out_cr) {
+    if (full_range) {
+        *out_cb = (-0.168736f * rgb.r) - (0.331264f * rgb.g) +
+                  (0.500000f * rgb.b) + 128.0f;
+        *out_cr = (0.500000f * rgb.r) - (0.418688f * rgb.g) -
+                  (0.081312f * rgb.b) + 128.0f;
+        return;
+    }
+    *out_cb =
+        128.0f +
+        ((-37.797f * rgb.r) - (74.203f * rgb.g) + (112.000f * rgb.b)) / 255.0f;
+    *out_cr =
+        128.0f +
+        ((112.000f * rgb.r) - (93.786f * rgb.g) - (18.214f * rgb.b)) / 255.0f;
 }
 
 void AppleCVAConfigInit(AppleCVAConfig *config) {
@@ -403,6 +561,16 @@ static OSType preferred_nv12_format(const AppleCVAConfig *config) {
                : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
 }
 
+static void tracker_release_scratch_buffer(AppleCVATracker *tracker) {
+    if (tracker->scratch_buffer != NULL) {
+        CVPixelBufferRelease(tracker->scratch_buffer);
+        tracker->scratch_buffer = NULL;
+        tracker->scratch_width = 0;
+        tracker->scratch_height = 0;
+        tracker->scratch_format = 0;
+    }
+}
+
 static bool ensure_scratch_buffer(AppleCVATracker *tracker, size_t width,
                                   size_t height) {
     const OSType format = preferred_nv12_format(&tracker->config);
@@ -412,13 +580,7 @@ static bool ensure_scratch_buffer(AppleCVATracker *tracker, size_t width,
         return true;
     }
 
-    if (tracker->scratch_buffer != NULL) {
-        CVPixelBufferRelease(tracker->scratch_buffer);
-        tracker->scratch_buffer = NULL;
-        tracker->scratch_width = 0;
-        tracker->scratch_height = 0;
-        tracker->scratch_format = 0;
-    }
+    tracker_release_scratch_buffer(tracker);
 
     NSDictionary *attrs =
         @{(__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{}};
@@ -436,45 +598,18 @@ static bool ensure_scratch_buffer(AppleCVATracker *tracker, size_t width,
     return true;
 }
 
-static void read_rgb_from_packed_pixel(const uint8_t *pixel, OSType format,
-                                       float *r, float *g, float *b) {
-    switch (format) {
-    case kCVPixelFormatType_32BGRA:
-        *b = (float)pixel[0];
-        *g = (float)pixel[1];
-        *r = (float)pixel[2];
-        break;
-    case kCVPixelFormatType_32ARGB:
-        *r = (float)pixel[1];
-        *g = (float)pixel[2];
-        *b = (float)pixel[3];
-        break;
-    case kCVPixelFormatType_32RGBA:
-        *r = (float)pixel[0];
-        *g = (float)pixel[1];
-        *b = (float)pixel[2];
-        break;
-    default:
-        *r = 0.0f;
-        *g = 0.0f;
-        *b = 0.0f;
-        break;
-    }
-}
-
 static bool convert_packed_to_nv12(AppleCVATracker *tracker,
                                    CVPixelBufferRef source_buffer,
                                    CVPixelBufferRef destination_buffer) {
     const OSType source_format = CVPixelBufferGetPixelFormatType(source_buffer);
-    CVReturn cv = CVPixelBufferLockBaseAddress(source_buffer,
-                                               kCVPixelBufferLock_ReadOnly);
-    if (cv != kCVReturnSuccess) {
+    AppleCVAPixelBufferLock source_lock = {0};
+    AppleCVAPixelBufferLock destination_lock = {0};
+    if (!pixel_buffer_lock(&source_lock, source_buffer,
+                           kCVPixelBufferLock_ReadOnly)) {
         return false;
     }
-    cv = CVPixelBufferLockBaseAddress(destination_buffer, 0);
-    if (cv != kCVReturnSuccess) {
-        CVPixelBufferUnlockBaseAddress(source_buffer,
-                                       kCVPixelBufferLock_ReadOnly);
+    if (!pixel_buffer_lock(&destination_lock, destination_buffer, 0)) {
+        pixel_buffer_unlock(&source_lock);
         return false;
     }
 
@@ -497,17 +632,9 @@ static bool convert_packed_to_nv12(AppleCVATracker *tracker,
         const uint8_t *src_row = src_base + (y * src_stride);
         uint8_t *dst_y = y_plane + (y * y_stride);
         for (size_t x = 0; x < width; ++x) {
-            float r = 0.0f;
-            float g = 0.0f;
-            float b = 0.0f;
-            read_rgb_from_packed_pixel(src_row + (x * 4), source_format, &r, &g,
-                                       &b);
-            const float y_value =
-                full_range ? ((0.2990f * r) + (0.5870f * g) + (0.1140f * b))
-                           : (16.0f +
-                              ((65.481f * r) + (128.553f * g) + (24.966f * b)) /
-                                  255.0f);
-            dst_y[x] = clamp_u8(y_value);
+            const AppleCVARGB rgb =
+                rgb_from_packed_pixel(src_row + (x * 4), source_format);
+            dst_y[x] = clamp_u8(rgb_to_luma(rgb, full_range));
         }
     }
 
@@ -518,49 +645,21 @@ static bool convert_packed_to_nv12(AppleCVATracker *tracker,
         uint8_t *dst_uv = uv_plane + ((y / 2) * uv_stride);
         for (size_t x = 0; x < width; x += 2) {
             const size_t next_x = (x + 1 < width) ? (x + 1) : x;
-            float r_values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-            float g_values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-            float b_values[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-
-            read_rgb_from_packed_pixel(src_row0 + (x * 4), source_format,
-                                       &r_values[0], &g_values[0],
-                                       &b_values[0]);
-            read_rgb_from_packed_pixel(src_row0 + (next_x * 4), source_format,
-                                       &r_values[1], &g_values[1],
-                                       &b_values[1]);
-            read_rgb_from_packed_pixel(src_row1 + (x * 4), source_format,
-                                       &r_values[2], &g_values[2],
-                                       &b_values[2]);
-            read_rgb_from_packed_pixel(src_row1 + (next_x * 4), source_format,
-                                       &r_values[3], &g_values[3],
-                                       &b_values[3]);
-
-            const float r =
-                (r_values[0] + r_values[1] + r_values[2] + r_values[3]) * 0.25f;
-            const float g =
-                (g_values[0] + g_values[1] + g_values[2] + g_values[3]) * 0.25f;
-            const float b =
-                (b_values[0] + b_values[1] + b_values[2] + b_values[3]) * 0.25f;
-
-            const float cb = full_range
-                                 ? ((-0.168736f * r) - (0.331264f * g) +
-                                    (0.500000f * b) + 128.0f)
-                                 : (128.0f + ((-37.797f * r) - (74.203f * g) +
-                                              (112.000f * b)) /
-                                                 255.0f);
-            const float cr =
-                full_range ? ((0.500000f * r) - (0.418688f * g) -
-                              (0.081312f * b) + 128.0f)
-                           : (128.0f +
-                              ((112.000f * r) - (93.786f * g) - (18.214f * b)) /
-                                  255.0f);
+            const AppleCVARGB rgb = average_rgb4(
+                rgb_from_packed_pixel(src_row0 + (x * 4), source_format),
+                rgb_from_packed_pixel(src_row0 + (next_x * 4), source_format),
+                rgb_from_packed_pixel(src_row1 + (x * 4), source_format),
+                rgb_from_packed_pixel(src_row1 + (next_x * 4), source_format));
+            float cb = 0.0f;
+            float cr = 0.0f;
+            rgb_to_chroma(rgb, full_range, &cb, &cr);
             dst_uv[x] = clamp_u8(cb);
             dst_uv[x + 1] = clamp_u8(cr);
         }
     }
 
-    CVPixelBufferUnlockBaseAddress(destination_buffer, 0);
-    CVPixelBufferUnlockBaseAddress(source_buffer, kCVPixelBufferLock_ReadOnly);
+    pixel_buffer_unlock(&destination_lock);
+    pixel_buffer_unlock(&source_lock);
     return true;
 }
 
@@ -594,40 +693,41 @@ static int32_t prepare_input_buffer(AppleCVATracker *tracker,
     return APPLECVA_OK;
 }
 
+static CFTypeRef dictionary_get_typed_value(CFDictionaryRef dictionary,
+                                            CFStringRef key,
+                                            CFTypeID expected_type) {
+    if (dictionary == NULL || key == NULL) {
+        return NULL;
+    }
+    CFTypeRef value = (CFTypeRef)CFDictionaryGetValue(dictionary, key);
+    if (value == NULL || CFGetTypeID(value) != expected_type) {
+        return NULL;
+    }
+    return value;
+}
+
 static CFArrayRef dictionary_get_array(CFDictionaryRef dictionary,
                                        CFStringRef key) {
-    if (dictionary == NULL) {
-        return NULL;
-    }
-    const void *value = CFDictionaryGetValue(dictionary, key);
-    if (value == NULL || CFGetTypeID(value) != CFArrayGetTypeID()) {
-        return NULL;
-    }
-    return (CFArrayRef)value;
+    return (CFArrayRef)dictionary_get_typed_value(dictionary, key,
+                                                  CFArrayGetTypeID());
 }
 
 static CFDictionaryRef dictionary_get_dictionary(CFDictionaryRef dictionary,
                                                  CFStringRef key) {
-    if (dictionary == NULL) {
-        return NULL;
-    }
-    const void *value = CFDictionaryGetValue(dictionary, key);
-    if (value == NULL || CFGetTypeID(value) != CFDictionaryGetTypeID()) {
-        return NULL;
-    }
-    return (CFDictionaryRef)value;
+    return (CFDictionaryRef)dictionary_get_typed_value(dictionary, key,
+                                                       CFDictionaryGetTypeID());
 }
 
 static CFDataRef dictionary_get_data(CFDictionaryRef dictionary,
                                      CFStringRef key) {
-    if (dictionary == NULL) {
-        return NULL;
-    }
-    const void *value = CFDictionaryGetValue(dictionary, key);
-    if (value == NULL || CFGetTypeID(value) != CFDataGetTypeID()) {
-        return NULL;
-    }
-    return (CFDataRef)value;
+    return (CFDataRef)dictionary_get_typed_value(dictionary, key,
+                                                 CFDataGetTypeID());
+}
+
+static CFStringRef dictionary_get_string(CFDictionaryRef dictionary,
+                                         CFStringRef key) {
+    return (CFStringRef)dictionary_get_typed_value(dictionary, key,
+                                                   CFStringGetTypeID());
 }
 
 static bool cf_type_to_double(CFTypeRef value, double *out_value) {
@@ -647,16 +747,21 @@ static bool dictionary_get_double(CFDictionaryRef dictionary, CFStringRef key,
                              out_value);
 }
 
-static bool dictionary_get_int64(CFDictionaryRef dictionary, CFStringRef key,
-                                 int64_t *out_value) {
-    if (dictionary == NULL || out_value == NULL) {
-        return false;
-    }
-    const void *value = CFDictionaryGetValue(dictionary, key);
-    if (value == NULL || CFGetTypeID(value) != CFNumberGetTypeID()) {
+static bool cf_type_to_int64(CFTypeRef value, int64_t *out_value) {
+    if (value == NULL || out_value == NULL ||
+        CFGetTypeID(value) != CFNumberGetTypeID()) {
         return false;
     }
     return CFNumberGetValue((CFNumberRef)value, kCFNumberSInt64Type, out_value);
+}
+
+static bool dictionary_get_int64(CFDictionaryRef dictionary, CFStringRef key,
+                                 int64_t *out_value) {
+    if (dictionary == NULL) {
+        return false;
+    }
+    return cf_type_to_int64((CFTypeRef)CFDictionaryGetValue(dictionary, key),
+                            out_value);
 }
 
 static bool fill_float_array_from_cfarray(CFArrayRef array, float *out_values,
@@ -731,30 +836,33 @@ static void fill_pose_from_dictionary(CFDictionaryRef dictionary,
         3);
 }
 
-static void fill_cfdata_floats(CFDataRef data, float *out_values,
-                               size_t max_values, size_t *out_count) {
-    *out_count = 0;
+static void copy_cfdata_values(CFDataRef data, void *out_values,
+                               size_t value_size, size_t max_values,
+                               size_t *out_count) {
+    if (out_count != NULL) {
+        *out_count = 0;
+    }
     if (data == NULL || out_values == NULL || max_values == 0) {
         return;
     }
-    const size_t value_count = (size_t)CFDataGetLength(data) / sizeof(float);
+    const size_t value_count = (size_t)CFDataGetLength(data) / value_size;
     const size_t copy_count =
         (value_count < max_values) ? value_count : max_values;
-    memcpy(out_values, CFDataGetBytePtr(data), copy_count * sizeof(float));
-    *out_count = copy_count;
+    memcpy(out_values, CFDataGetBytePtr(data), copy_count * value_size);
+    if (out_count != NULL) {
+        *out_count = copy_count;
+    }
+}
+
+static void fill_cfdata_floats(CFDataRef data, float *out_values,
+                               size_t max_values, size_t *out_count) {
+    copy_cfdata_values(data, out_values, sizeof(float), max_values, out_count);
 }
 
 static void fill_cfdata_u32s(CFDataRef data, uint32_t *out_values,
                              size_t max_values, size_t *out_count) {
-    *out_count = 0;
-    if (data == NULL || out_values == NULL || max_values == 0) {
-        return;
-    }
-    const size_t value_count = (size_t)CFDataGetLength(data) / sizeof(uint32_t);
-    const size_t copy_count =
-        (value_count < max_values) ? value_count : max_values;
-    memcpy(out_values, CFDataGetBytePtr(data), copy_count * sizeof(uint32_t));
-    *out_count = copy_count;
+    copy_cfdata_values(data, out_values, sizeof(uint32_t), max_values,
+                       out_count);
 }
 
 static bool
@@ -784,6 +892,91 @@ copy_string_array(CFArrayRef array,
     return true;
 }
 
+typedef struct {
+    CFDictionaryRef root;
+    CFDictionaryRef animation;
+    CFDictionaryRef geometry;
+    CFDictionaryRef pose;
+} AppleCVAFacePayload;
+
+static AppleCVAFacePayload face_payload_from_dictionary(CFDictionaryRef source,
+                                                        CFStringRef key) {
+    AppleCVAFacePayload payload = {0};
+    payload.root = dictionary_get_dictionary(source, key);
+    payload.animation =
+        dictionary_get_dictionary(payload.root, CFSTR("animation"));
+    payload.geometry =
+        dictionary_get_dictionary(payload.root, CFSTR("geometry"));
+    payload.pose = dictionary_get_dictionary(payload.root, CFSTR("pose"));
+    return payload;
+}
+
+static bool dictionary_get_preferred_double(CFDictionaryRef preferred,
+                                            CFDictionaryRef fallback,
+                                            CFStringRef key,
+                                            double *out_value) {
+    return dictionary_get_double(preferred, key, out_value) ||
+           dictionary_get_double(fallback, key, out_value);
+}
+
+static void fill_face_animation_scalar(CFDictionaryRef raw_animation,
+                                       CFDictionaryRef smooth_animation,
+                                       CFStringRef key, float *out_value) {
+    double scalar = 0.0;
+    if (dictionary_get_preferred_double(smooth_animation, raw_animation, key,
+                                        &scalar)) {
+        *out_value = (float)scalar;
+    }
+}
+
+static void fill_face_gaze(CFDictionaryRef raw_animation,
+                           CFDictionaryRef smooth_animation,
+                           AppleCVATrackedFace *face) {
+    const bool has_raw_gaze = fill_float_array_from_cfarray(
+        dictionary_get_array(raw_animation, CFSTR("gaze")), face->raw_gaze, 3);
+    const bool has_smooth_gaze = fill_float_array_from_cfarray(
+        dictionary_get_array(smooth_animation, CFSTR("gaze")),
+        face->smooth_gaze, 3);
+    if (has_smooth_gaze) {
+        memcpy(face->gaze, face->smooth_gaze, sizeof(face->gaze));
+    } else if (has_raw_gaze) {
+        memcpy(face->gaze, face->raw_gaze, sizeof(face->gaze));
+    }
+}
+
+static void copy_preferred_float_values(const float *preferred,
+                                        size_t preferred_count,
+                                        const float *fallback,
+                                        size_t fallback_count,
+                                        float *out_values, size_t *out_count) {
+    const float *source = preferred;
+    size_t count = preferred_count;
+    if (count == 0) {
+        source = fallback;
+        count = fallback_count;
+    }
+    if (count != 0) {
+        memcpy(out_values, source, count * sizeof(float));
+    }
+    *out_count = count;
+}
+
+static void fill_face_blendshapes(CFDictionaryRef raw_animation,
+                                  CFDictionaryRef smooth_animation,
+                                  AppleCVATrackedFace *face) {
+    fill_cfdata_floats(dictionary_get_data(raw_animation, CFSTR("blendshapes")),
+                       face->raw_blendshapes, APPLECVA_MAX_BLENDSHAPES,
+                       &face->raw_blendshape_count);
+    fill_cfdata_floats(
+        dictionary_get_data(smooth_animation, CFSTR("blendshapes")),
+        face->smooth_blendshapes, APPLECVA_MAX_BLENDSHAPES,
+        &face->smooth_blendshape_count);
+    copy_preferred_float_values(
+        face->smooth_blendshapes, face->smooth_blendshape_count,
+        face->raw_blendshapes, face->raw_blendshape_count, face->blendshapes,
+        &face->blendshape_count);
+}
+
 static void fill_tracked_face_from_dictionary(CFDictionaryRef dictionary,
                                               AppleCVATrackedFace *face) {
     memset(face, 0, sizeof(*face));
@@ -792,9 +985,8 @@ static void fill_tracked_face_from_dictionary(CFDictionaryRef dictionary,
     }
     face->valid = true;
 
-    CFStringRef face_id =
-        (CFStringRef)CFDictionaryGetValue(dictionary, CFSTR("face_id"));
-    if (face_id != NULL && CFGetTypeID(face_id) == CFStringGetTypeID()) {
+    CFStringRef face_id = dictionary_get_string(dictionary, CFSTR("face_id"));
+    if (face_id != NULL) {
         CFStringGetCString(face_id, face->face_id, sizeof(face->face_id),
                            kCFStringEncodingUTF8);
     }
@@ -815,87 +1007,37 @@ static void fill_tracked_face_from_dictionary(CFDictionaryRef dictionary,
     fill_rect_from_dictionary(
         dictionary_get_dictionary(dictionary, CFSTR("Rect")), face->rect);
 
-    CFDictionaryRef raw_data =
-        dictionary_get_dictionary(dictionary, CFSTR("raw_data"));
-    CFDictionaryRef raw_animation =
-        dictionary_get_dictionary(raw_data, CFSTR("animation"));
-    CFDictionaryRef raw_pose =
-        dictionary_get_dictionary(raw_data, CFSTR("pose"));
-    CFDictionaryRef smooth_data =
-        dictionary_get_dictionary(dictionary, CFSTR("smooth_data"));
-    CFDictionaryRef smooth_animation =
-        dictionary_get_dictionary(smooth_data, CFSTR("animation"));
-    CFDictionaryRef smooth_geometry =
-        dictionary_get_dictionary(smooth_data, CFSTR("geometry"));
-    CFDictionaryRef smooth_pose =
-        dictionary_get_dictionary(smooth_data, CFSTR("pose"));
+    const AppleCVAFacePayload raw =
+        face_payload_from_dictionary(dictionary, CFSTR("raw_data"));
+    const AppleCVAFacePayload smooth =
+        face_payload_from_dictionary(dictionary, CFSTR("smooth_data"));
 
-    const bool has_raw_gaze = fill_float_array_from_cfarray(
-        dictionary_get_array(raw_animation, CFSTR("gaze")), face->raw_gaze, 3);
-    const bool has_smooth_gaze = fill_float_array_from_cfarray(
-        dictionary_get_array(smooth_animation, CFSTR("gaze")),
-        face->smooth_gaze, 3);
-    if (has_smooth_gaze) {
-        memcpy(face->gaze, face->smooth_gaze, sizeof(face->gaze));
-    } else if (has_raw_gaze) {
-        memcpy(face->gaze, face->raw_gaze, sizeof(face->gaze));
-    }
+    fill_face_gaze(raw.animation, smooth.animation, face);
     fill_float_array_from_cfarray(
-        dictionary_get_array(smooth_geometry, CFSTR("left_eye")),
+        dictionary_get_array(smooth.geometry, CFSTR("left_eye")),
         face->left_eye, 3);
     fill_float_array_from_cfarray(
-        dictionary_get_array(smooth_geometry, CFSTR("right_eye")),
+        dictionary_get_array(smooth.geometry, CFSTR("right_eye")),
         face->right_eye, 3);
 
-    double scalar = 0.0;
-    if (dictionary_get_double(smooth_animation, CFSTR("left_eye_pitch"),
-                              &scalar) ||
-        dictionary_get_double(raw_animation, CFSTR("left_eye_pitch"),
-                              &scalar)) {
-        face->left_eye_pitch = (float)scalar;
-    }
-    if (dictionary_get_double(smooth_animation, CFSTR("left_eye_yaw"),
-                              &scalar) ||
-        dictionary_get_double(raw_animation, CFSTR("left_eye_yaw"), &scalar)) {
-        face->left_eye_yaw = (float)scalar;
-    }
-    if (dictionary_get_double(smooth_animation, CFSTR("right_eye_pitch"),
-                              &scalar) ||
-        dictionary_get_double(raw_animation, CFSTR("right_eye_pitch"),
-                              &scalar)) {
-        face->right_eye_pitch = (float)scalar;
-    }
-    if (dictionary_get_double(smooth_animation, CFSTR("right_eye_yaw"),
-                              &scalar) ||
-        dictionary_get_double(raw_animation, CFSTR("right_eye_yaw"), &scalar)) {
-        face->right_eye_yaw = (float)scalar;
-    }
-    if (dictionary_get_double(smooth_animation, CFSTR("tongue_out"), &scalar) ||
-        dictionary_get_double(raw_animation, CFSTR("tongue_out"), &scalar)) {
-        face->tongue_out = (float)scalar;
-    }
+    fill_face_animation_scalar(raw.animation, smooth.animation,
+                               CFSTR("left_eye_pitch"), &face->left_eye_pitch);
+    fill_face_animation_scalar(raw.animation, smooth.animation,
+                               CFSTR("left_eye_yaw"), &face->left_eye_yaw);
+    fill_face_animation_scalar(raw.animation, smooth.animation,
+                               CFSTR("right_eye_pitch"),
+                               &face->right_eye_pitch);
+    fill_face_animation_scalar(raw.animation, smooth.animation,
+                               CFSTR("right_eye_yaw"), &face->right_eye_yaw);
+    fill_face_animation_scalar(raw.animation, smooth.animation,
+                               CFSTR("tongue_out"), &face->tongue_out);
 
-    fill_pose_from_dictionary(raw_pose, face->raw_rotation,
+    fill_pose_from_dictionary(raw.pose, face->raw_rotation,
                               face->raw_translation);
-    fill_pose_from_dictionary(smooth_pose, face->smooth_rotation,
+    fill_pose_from_dictionary(smooth.pose, face->smooth_rotation,
                               face->smooth_translation);
-    fill_cfdata_floats(dictionary_get_data(raw_animation, CFSTR("blendshapes")),
-                       face->raw_blendshapes, APPLECVA_MAX_BLENDSHAPES,
-                       &face->raw_blendshape_count);
-    fill_cfdata_floats(
-        dictionary_get_data(smooth_animation, CFSTR("blendshapes")),
-        face->smooth_blendshapes, APPLECVA_MAX_BLENDSHAPES,
-        &face->smooth_blendshape_count);
-    if (face->smooth_blendshape_count != 0) {
-        memcpy(face->blendshapes, face->smooth_blendshapes,
-               face->smooth_blendshape_count * sizeof(float));
-        face->blendshape_count = face->smooth_blendshape_count;
-    } else {
-        memcpy(face->blendshapes, face->raw_blendshapes,
-               face->raw_blendshape_count * sizeof(float));
-        face->blendshape_count = face->raw_blendshape_count;
-    }
-    fill_cfdata_floats(dictionary_get_data(smooth_geometry, CFSTR("landmarks")),
+    fill_face_blendshapes(raw.animation, smooth.animation, face);
+    fill_cfdata_floats(dictionary_get_data(smooth.geometry, CFSTR("landmarks")),
                        face->landmarks, APPLECVA_MAX_LANDMARK_FLOATS,
                        &face->landmark_float_count);
     face->landmark_pair_count = face->landmark_float_count / 2;
@@ -914,6 +1056,114 @@ static NSNumber *full_api_number_from_env(const char *name) {
     return @(parsed);
 }
 
+static uint32_t effective_lux_level(const AppleCVATracker *tracker,
+                                    uint32_t lux_level) {
+    return (lux_level != 0) ? lux_level : tracker->config.default_lux_level;
+}
+
+static void tracker_apply_config(AppleCVATracker *tracker,
+                                 const AppleCVAConfig *config) {
+    AppleCVAConfigInit(&tracker->config);
+    if (config != NULL) {
+        tracker->config = *config;
+    }
+    if (tracker->config.focal_scale <= 0.0f) {
+        tracker->config.focal_scale = 1.0f;
+    }
+}
+
+static void tracker_release_runtime(AppleCVATracker *tracker) {
+    tracker_release_scratch_buffer(tracker);
+    if (tracker->tracker != NULL) {
+        CFRelease((CFTypeRef)tracker->tracker);
+        tracker->tracker = NULL;
+    }
+    if (tracker->full_tracker != NULL) {
+        CFRelease((CFTypeRef)tracker->full_tracker);
+        tracker->full_tracker = NULL;
+    }
+    if (tracker->full_last_output != NULL) {
+        CFRelease(tracker->full_last_output);
+        tracker->full_last_output = NULL;
+    }
+    unload_api(&tracker->api);
+    unload_full_api(&tracker->full_api);
+}
+
+static void full_api_add_optional_tongue_options(NSMutableDictionary *options,
+                                                 const AppleCVAFullKeys *keys) {
+    if (keys->use_tongue != NULL) {
+        options[ns_key(keys->use_tongue)] = @YES;
+        if (keys->robust_tongue != NULL) {
+            options[ns_key(keys->robust_tongue)] = @YES;
+        }
+    }
+}
+
+static void full_api_add_network_options(NSMutableDictionary *options,
+                                         const AppleCVAFullKeys *keys) {
+    NSNumber *network_failure_multiplier =
+        full_api_number_from_env("APPLECVA_FULL_NETWORK_FAILURE_MULTIPLIER");
+    if (network_failure_multiplier == nil &&
+        getenv("APPLECVA_FULL_STRICT_THRESHOLDS") == NULL) {
+        network_failure_multiplier = @5.0;
+    }
+    if (network_failure_multiplier != nil) {
+        options[ns_key(keys->network_failure_threshold_multiplier)] =
+            network_failure_multiplier;
+        trace_log("full network failure multiplier=%s",
+                  network_failure_multiplier.description.UTF8String);
+    }
+}
+
+static NSMutableDictionary *
+full_api_create_options(const AppleCVAFullKeys *keys) {
+    NSMutableDictionary *options = [@{
+        ns_key(keys->color_only) : @YES,
+        ns_key(keys->fitting_enabled) : @YES,
+        ns_key(keys->add_keypoints) : @YES,
+        ns_key(keys->add_mesh) : @YES,
+        ns_key(keys->num_tracked_faces) : @3,
+        ns_key(keys->use_face_detector) : @NO,
+        ns_key(keys->force_cpu) : @NO,
+    } mutableCopy];
+    full_api_add_optional_tongue_options(options, keys);
+    full_api_add_network_options(options, keys);
+    return options;
+}
+
+static int32_t tracker_create_full_backend(AppleCVATracker *tracker) {
+    if (!load_full_api(&tracker->full_api)) {
+        return APPLECVA_ERR_SYMBOL_BIND;
+    }
+    NSMutableDictionary *options =
+        full_api_create_options(&tracker->full_api.keys);
+    const int32_t status = tracker->full_api.create(
+        kCFAllocatorDefault, (__bridge CFDictionaryRef)options,
+        &tracker->full_tracker);
+    if (status != 0 || tracker->full_tracker == NULL) {
+        return APPLECVA_ERR_CREATE_TRACKER;
+    }
+    return APPLECVA_OK;
+}
+
+static int32_t tracker_create_lite_backend(AppleCVATracker *tracker) {
+    if (!load_api(&tracker->api)) {
+        return APPLECVA_ERR_SYMBOL_BIND;
+    }
+
+    const CVAFaceTrackingLiteCreateOptions options =
+        tracker->config.use_feature_options
+            ? tracker->api.get_create_options_for_features(true, true)
+            : tracker->api.get_default_create_options();
+    const int32_t status =
+        tracker->api.create(kCFAllocatorDefault, &options, &tracker->tracker);
+    if (status != 0 || tracker->tracker == NULL) {
+        return APPLECVA_ERR_CREATE_TRACKER;
+    }
+    return APPLECVA_OK;
+}
+
 int32_t AppleCVATrackerCreate(const AppleCVAConfig *config,
                               AppleCVATracker **out_tracker) {
     if (out_tracker == NULL) {
@@ -926,72 +1176,15 @@ int32_t AppleCVATrackerCreate(const AppleCVAConfig *config,
         return APPLECVA_ERR_CREATE_TRACKER;
     }
 
-    AppleCVAConfigInit(&tracker->config);
-    if (config != NULL) {
-        tracker->config = *config;
-    }
-    if (tracker->config.focal_scale <= 0.0f) {
-        tracker->config.focal_scale = 1.0f;
-    }
+    tracker_apply_config(tracker, config);
 
-    if (tracker->config.use_full_api) {
-        if (!load_full_api(&tracker->full_api)) {
-            free(tracker);
-            return APPLECVA_ERR_SYMBOL_BIND;
-        }
-        const AppleCVAFullKeys *keys = &tracker->full_api.keys;
-        NSMutableDictionary *options = [@{
-            ns_key(keys->color_only) : @YES,
-            ns_key(keys->fitting_enabled) : @YES,
-            ns_key(keys->add_keypoints) : @YES,
-            ns_key(keys->add_mesh) : @YES,
-            ns_key(keys->num_tracked_faces) : @3,
-            ns_key(keys->use_face_detector) : @NO,
-            ns_key(keys->force_cpu) : @NO,
-        } mutableCopy];
-        if (keys->use_tongue != NULL) {
-            options[ns_key(keys->use_tongue)] = @YES;
-            if (keys->robust_tongue != NULL) {
-                options[ns_key(keys->robust_tongue)] = @YES;
-            }
-        }
-        NSNumber *network_failure_multiplier = full_api_number_from_env(
-            "APPLECVA_FULL_NETWORK_FAILURE_MULTIPLIER");
-        if (network_failure_multiplier == nil &&
-            getenv("APPLECVA_FULL_STRICT_THRESHOLDS") == NULL) {
-            network_failure_multiplier = @5.0;
-        }
-        if (network_failure_multiplier != nil) {
-            options[ns_key(keys->network_failure_threshold_multiplier)] =
-                network_failure_multiplier;
-            trace_log("full network failure multiplier=%s",
-                      network_failure_multiplier.description.UTF8String);
-        }
-        int32_t status = tracker->full_api.create(
-            kCFAllocatorDefault, (__bridge CFDictionaryRef)options,
-            &tracker->full_tracker);
-        if (status != 0 || tracker->full_tracker == NULL) {
-            unload_full_api(&tracker->full_api);
-            free(tracker);
-            return APPLECVA_ERR_CREATE_TRACKER;
-        }
-    } else {
-        if (!load_api(&tracker->api)) {
-            free(tracker);
-            return APPLECVA_ERR_SYMBOL_BIND;
-        }
-
-        const CVAFaceTrackingLiteCreateOptions options =
-            tracker->config.use_feature_options
-                ? tracker->api.get_create_options_for_features(true, true)
-                : tracker->api.get_default_create_options();
-        int32_t status = tracker->api.create(kCFAllocatorDefault, &options,
-                                             &tracker->tracker);
-        if (status != 0 || tracker->tracker == NULL) {
-            unload_api(&tracker->api);
-            free(tracker);
-            return APPLECVA_ERR_CREATE_TRACKER;
-        }
+    const int32_t status = tracker->config.use_full_api
+                               ? tracker_create_full_backend(tracker)
+                               : tracker_create_lite_backend(tracker);
+    if (status != APPLECVA_OK) {
+        tracker_release_runtime(tracker);
+        free(tracker);
+        return status;
     }
 
     *out_tracker = tracker;
@@ -1002,21 +1195,16 @@ void AppleCVATrackerDestroy(AppleCVATracker *tracker) {
     if (tracker == NULL) {
         return;
     }
-    if (tracker->scratch_buffer != NULL) {
-        CVPixelBufferRelease(tracker->scratch_buffer);
-    }
-    if (tracker->tracker != NULL) {
-        CFRelease((CFTypeRef)tracker->tracker);
-    }
-    if (tracker->full_tracker != NULL) {
-        CFRelease((CFTypeRef)tracker->full_tracker);
-    }
-    if (tracker->full_last_output != NULL) {
-        CFRelease(tracker->full_last_output);
-    }
-    unload_api(&tracker->api);
-    unload_full_api(&tracker->full_api);
+    tracker_release_runtime(tracker);
     free(tracker);
+}
+
+static void init_raw_output_result(CFDictionaryRef *out_decoded_output,
+                                   bool *out_aux_flag) {
+    *out_decoded_output = NULL;
+    if (out_aux_flag != NULL) {
+        *out_aux_flag = false;
+    }
 }
 
 static int32_t
@@ -1026,10 +1214,7 @@ copy_raw_decoded_output_internal(AppleCVATracker *tracker,
     if (tracker == NULL || out_decoded_output == NULL) {
         return APPLECVA_ERR_INVALID_ARGUMENT;
     }
-    *out_decoded_output = NULL;
-    if (out_aux_flag != NULL) {
-        *out_aux_flag = false;
-    }
+    init_raw_output_result(out_decoded_output, out_aux_flag);
 
     const void *output = tracker->api.get_output(tracker->tracker);
     if (output == NULL) {
@@ -1082,13 +1267,11 @@ int32_t AppleCVACopySemantics(AppleCVASemantics *out_semantics) {
         api.maximum_number_of_tracked_faces();
 
     CFDictionaryRef semantics = NULL;
+    int32_t result = APPLECVA_OK;
     const int32_t status = api.copy_semantics(NULL, &semantics);
     if (status != 0 || semantics == NULL) {
-        if (semantics != NULL) {
-            CFRelease(semantics);
-        }
-        unload_api(&api);
-        return (status != 0) ? status : APPLECVA_ERR_SEMANTICS_FAILED;
+        result = (status != 0) ? status : APPLECVA_ERR_SEMANTICS_FAILED;
+        goto cleanup;
     }
 
     const bool ok =
@@ -1118,10 +1301,14 @@ int32_t AppleCVACopySemantics(AppleCVASemantics *out_semantics) {
 
     out_semantics->valid = ok && out_semantics->blendshape_name_count != 0 &&
                            out_semantics->landmark_name_count != 0;
+    result = out_semantics->valid ? APPLECVA_OK : APPLECVA_ERR_SEMANTICS_FAILED;
 
-    CFRelease(semantics);
+cleanup:
+    if (semantics != NULL) {
+        CFRelease(semantics);
+    }
     unload_api(&api);
-    return out_semantics->valid ? APPLECVA_OK : APPLECVA_ERR_SEMANTICS_FAILED;
+    return result;
 }
 
 int32_t AppleCVATrackerCopyRawDecodedOutput(AppleCVATracker *tracker,
@@ -1131,10 +1318,7 @@ int32_t AppleCVATrackerCopyRawDecodedOutput(AppleCVATracker *tracker,
         if (out_decoded_output == NULL) {
             return APPLECVA_ERR_INVALID_ARGUMENT;
         }
-        *out_decoded_output = NULL;
-        if (out_aux_flag != NULL) {
-            *out_aux_flag = false;
-        }
+        init_raw_output_result(out_decoded_output, out_aux_flag);
         if (tracker->full_last_output == NULL) {
             return APPLECVA_ERR_DECODE_FAILED;
         }
@@ -1180,6 +1364,32 @@ static void fill_frame_result_from_output(CFDictionaryRef decoded_output,
     }
 }
 
+static void tracker_take_full_last_output(AppleCVATracker *tracker,
+                                          CFDictionaryRef output) {
+    if (tracker->full_last_output != NULL) {
+        CFRelease(tracker->full_last_output);
+    }
+    tracker->full_last_output = output;
+}
+
+static void trace_full_output(CFDictionaryRef output) {
+    CFArrayRef tracked_array =
+        dictionary_get_array(output, CFSTR("tracked_faces"));
+    CFArrayRef detected_array =
+        dictionary_get_array(output, CFSTR("DetectedFacesArray"));
+    CFStringRef facekit_error =
+        dictionary_get_string(output, CFSTR("facekit error"));
+    char error_buffer[128] = {0};
+    if (facekit_error != NULL) {
+        CFStringGetCString(facekit_error, error_buffer, sizeof(error_buffer),
+                           kCFStringEncodingUTF8);
+    }
+    trace_log("full output detected=%ld tracked=%ld error=%s",
+              detected_array != NULL ? CFArrayGetCount(detected_array) : -1,
+              tracked_array != NULL ? CFArrayGetCount(tracked_array) : -1,
+              error_buffer[0] != '\0' ? error_buffer : "-");
+}
+
 static NSArray *full_api_matrix3x3(const float values[9]) {
     return @[
         @[ @(values[0]), @(values[1]), @(values[2]) ],
@@ -1214,11 +1424,11 @@ static NSDictionary *full_api_time_dictionary(double timestamp_seconds) {
 static float full_api_face_smoothing_alpha(void) {
     const char *value = getenv("APPLECVA_FULL_FACE_SMOOTHING");
     if (value == NULL || value[0] == '\0') {
-        return 0.25f;
+        return APPLECVA_FULL_FACE_DEFAULT_SMOOTHING;
     }
     const float alpha = strtof(value, NULL);
     if (!(alpha >= 0.0f && alpha <= 1.0f)) {
-        return 0.25f;
+        return APPLECVA_FULL_FACE_DEFAULT_SMOOTHING;
     }
     return alpha;
 }
@@ -1226,12 +1436,12 @@ static float full_api_face_smoothing_alpha(void) {
 static size_t full_api_face_hold_frames(void) {
     const char *value = getenv("APPLECVA_FULL_FACE_HOLD");
     if (value == NULL || value[0] == '\0') {
-        return 15;
+        return APPLECVA_FULL_FACE_DEFAULT_HOLD_FRAMES;
     }
     char *end = NULL;
     const unsigned long frames = strtoul(value, &end, 10);
     if (end == value) {
-        return 15;
+        return APPLECVA_FULL_FACE_DEFAULT_HOLD_FRAMES;
     }
     return (size_t)frames;
 }
@@ -1296,7 +1506,7 @@ static size_t full_api_prepare_detected_faces(
                     best_index = j;
                 }
             }
-            if (best_distance < 0.08f) {
+            if (best_distance < APPLECVA_FULL_FACE_MATCH_DISTANCE2) {
                 AppleCVADetectedFace smoothed =
                     tracker->full_input_faces[best_index];
                 smooth_detected_face(&smoothed, &face, alpha);
@@ -1371,8 +1581,7 @@ process_frame_full_api(AppleCVATracker *tracker, CVPixelBufferRef input_buffer,
         sizeof(prepared_faces) / sizeof(prepared_faces[0]));
     NSArray *faces = full_api_detected_faces_array(keys, prepared_faces,
                                                    prepared_face_count);
-    const uint32_t effective_lux =
-        (lux_level != 0) ? lux_level : tracker->config.default_lux_level;
+    const uint32_t effective_lux = effective_lux_level(tracker, lux_level);
 
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
     __block CFDictionaryRef callback_output = NULL;
@@ -1407,34 +1616,120 @@ process_frame_full_api(AppleCVATracker *tracker, CVPixelBufferRef input_buffer,
         return status;
     }
 
-    dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC);
+    dispatch_time_t deadline =
+        dispatch_time(DISPATCH_TIME_NOW, APPLECVA_FULL_CALLBACK_TIMEOUT_NS);
     (void)dispatch_semaphore_wait(semaphore, deadline);
     if (callback_output == NULL) {
         return APPLECVA_ERR_DECODE_FAILED;
     }
 
-    if (tracker->full_last_output != NULL) {
-        CFRelease(tracker->full_last_output);
-    }
-    tracker->full_last_output = callback_output;
+    tracker_take_full_last_output(tracker, callback_output);
     out_result->aux_flag = false;
     fill_frame_result_from_output(callback_output, out_result);
-    CFArrayRef tracked_array =
-        dictionary_get_array(callback_output, CFSTR("tracked_faces"));
-    CFArrayRef detected_array =
-        dictionary_get_array(callback_output, CFSTR("DetectedFacesArray"));
-    CFTypeRef facekit_error =
-        CFDictionaryGetValue(callback_output, CFSTR("facekit error"));
-    char error_buffer[128] = {0};
-    if (facekit_error != NULL &&
-        CFGetTypeID(facekit_error) == CFStringGetTypeID()) {
-        CFStringGetCString((CFStringRef)facekit_error, error_buffer,
-                           sizeof(error_buffer), kCFStringEncodingUTF8);
+    trace_full_output(callback_output);
+    return APPLECVA_OK;
+}
+
+typedef struct {
+    CVAFaceTrackingLiteDetectedFace stack[APPLECVA_LITE_STACK_FACE_CAPACITY];
+    CVAFaceTrackingLiteDetectedFace *faces;
+    size_t count;
+} AppleCVALiteFaceInput;
+
+static int32_t lite_face_input_init(AppleCVALiteFaceInput *input,
+                                    const AppleCVADetectedFace *detected_faces,
+                                    size_t detected_face_count) {
+    memset(input, 0, sizeof(*input));
+    input->faces = input->stack;
+    input->count = detected_face_count;
+    if (detected_face_count > APPLECVA_ARRAY_COUNT(input->stack)) {
+        input->faces = calloc(detected_face_count, sizeof(*input->faces));
+        if (input->faces == NULL) {
+            input->count = 0;
+            return APPLECVA_ERR_INVALID_ARGUMENT;
+        }
     }
-    trace_log("full output detected=%ld tracked=%ld error=%s",
-              detected_array != NULL ? CFArrayGetCount(detected_array) : -1,
-              tracked_array != NULL ? CFArrayGetCount(tracked_array) : -1,
-              error_buffer[0] != '\0' ? error_buffer : "-");
+
+    for (size_t i = 0; i < detected_face_count; ++i) {
+        input->faces[i].x = detected_faces[i].x;
+        input->faces[i].y = detected_faces[i].y;
+        input->faces[i].width = detected_faces[i].width;
+        input->faces[i].height = detected_faces[i].height;
+        input->faces[i].roll = detected_faces[i].roll;
+    }
+    return APPLECVA_OK;
+}
+
+static void lite_face_input_destroy(AppleCVALiteFaceInput *input) {
+    if (input->faces != NULL && input->faces != input->stack) {
+        free(input->faces);
+    }
+    memset(input, 0, sizeof(*input));
+}
+
+static int32_t
+submit_lite_frame(AppleCVATracker *tracker, CVPixelBufferRef input_buffer,
+                  const CVAFaceTrackingLiteCameraParams *camera_parameters,
+                  const AppleCVALiteFaceInput *face_input,
+                  double timestamp_seconds, uint32_t lux_level) {
+    int32_t status =
+        tracker->api.set_timestamp(tracker->tracker, timestamp_seconds);
+    trace_log("set_timestamp => %d", status);
+    if (status == 0) {
+        const uint32_t effective_lux = effective_lux_level(tracker, lux_level);
+        status = tracker->api.set_lux_level(tracker->tracker, effective_lux);
+        trace_log("set_lux_level(%u) => %d", effective_lux, status);
+    }
+    if (status == 0) {
+        status = tracker->api.set_color_image(tracker->tracker, input_buffer,
+                                              camera_parameters);
+        trace_log("set_color_image => %d", status);
+    }
+    if (status == 0) {
+        status = tracker->api.set_detected_faces(
+            tracker->tracker, (uint32_t)face_input->count, face_input->faces);
+        trace_log("set_detected_faces => %d", status);
+    }
+    if (status == 0) {
+        status = tracker->api.process(tracker->tracker);
+        trace_log("process => %d", status);
+    }
+    return status;
+}
+
+static int32_t
+process_frame_lite_api(AppleCVATracker *tracker, CVPixelBufferRef input_buffer,
+                       const AppleCVACameraParameters *camera_parameters,
+                       const AppleCVADetectedFace *detected_faces,
+                       size_t detected_face_count, double timestamp_seconds,
+                       uint32_t lux_level, AppleCVAFrameResult *out_result) {
+    CVAFaceTrackingLiteCameraParams internal_camera_params;
+    make_internal_camera_params(camera_parameters, &internal_camera_params);
+
+    AppleCVALiteFaceInput face_input;
+    int32_t status =
+        lite_face_input_init(&face_input, detected_faces, detected_face_count);
+    if (status != APPLECVA_OK) {
+        return status;
+    }
+
+    status = submit_lite_frame(tracker, input_buffer, &internal_camera_params,
+                               &face_input, timestamp_seconds, lux_level);
+    lite_face_input_destroy(&face_input);
+    if (status != 0) {
+        return status;
+    }
+
+    CFDictionaryRef decoded_output = NULL;
+    status = copy_raw_decoded_output_internal(tracker, &decoded_output,
+                                              &out_result->aux_flag);
+    if (status != APPLECVA_OK) {
+        return status;
+    }
+
+    fill_frame_result_from_output(decoded_output, out_result);
+
+    CFRelease(decoded_output);
     return APPLECVA_OK;
 }
 
@@ -1459,7 +1754,7 @@ int32_t AppleCVATrackerProcessFrame(
               (unsigned int)CVPixelBufferGetPixelFormatType(pixel_buffer));
 
     CVPixelBufferRef input_buffer = NULL;
-    int32_t wrapper_status =
+    const int32_t wrapper_status =
         prepare_input_buffer(tracker, pixel_buffer, &input_buffer);
     if (wrapper_status != APPLECVA_OK) {
         trace_log("prepare_input_buffer failed: %d", wrapper_status);
@@ -1473,72 +1768,9 @@ int32_t AppleCVATrackerProcessFrame(
                                       detected_faces, detected_face_count,
                                       timestamp_seconds, lux_level, out_result);
     }
-
-    CVAFaceTrackingLiteCameraParams internal_camera_params;
-    make_internal_camera_params(camera_parameters, &internal_camera_params);
-    CVAFaceTrackingLiteDetectedFace internal_faces_stack[8];
-    CVAFaceTrackingLiteDetectedFace *internal_faces_heap = NULL;
-    CVAFaceTrackingLiteDetectedFace *internal_faces = internal_faces_stack;
-    if (detected_face_count >
-        (sizeof(internal_faces_stack) / sizeof(internal_faces_stack[0]))) {
-        internal_faces_heap =
-            calloc(detected_face_count, sizeof(*internal_faces_heap));
-        if (internal_faces_heap == NULL) {
-            return APPLECVA_ERR_INVALID_ARGUMENT;
-        }
-        internal_faces = internal_faces_heap;
-    }
-
-    for (size_t i = 0; i < detected_face_count; ++i) {
-        internal_faces[i].x = detected_faces[i].x;
-        internal_faces[i].y = detected_faces[i].y;
-        internal_faces[i].width = detected_faces[i].width;
-        internal_faces[i].height = detected_faces[i].height;
-        internal_faces[i].roll = detected_faces[i].roll;
-    }
-
-    int32_t status =
-        tracker->api.set_timestamp(tracker->tracker, timestamp_seconds);
-    trace_log("set_timestamp => %d", status);
-    if (status == 0) {
-        const uint32_t effective_lux =
-            (lux_level != 0) ? lux_level : tracker->config.default_lux_level;
-        status = tracker->api.set_lux_level(tracker->tracker, effective_lux);
-        trace_log("set_lux_level(%u) => %d", effective_lux, status);
-    }
-    if (status == 0) {
-        status = tracker->api.set_color_image(tracker->tracker, input_buffer,
-                                              &internal_camera_params);
-        trace_log("set_color_image => %d", status);
-    }
-    if (status == 0) {
-        status = tracker->api.set_detected_faces(
-            tracker->tracker, (uint32_t)detected_face_count, internal_faces);
-        trace_log("set_detected_faces => %d", status);
-    }
-    if (status == 0) {
-        status = tracker->api.process(tracker->tracker);
-        trace_log("process => %d", status);
-    }
-
-    if (internal_faces_heap != NULL) {
-        free(internal_faces_heap);
-    }
-    if (status != 0) {
-        return status;
-    }
-
-    CFDictionaryRef decoded_output = NULL;
-    status = copy_raw_decoded_output_internal(tracker, &decoded_output,
-                                              &out_result->aux_flag);
-    if (status != APPLECVA_OK) {
-        return status;
-    }
-
-    fill_frame_result_from_output(decoded_output, out_result);
-
-    CFRelease(decoded_output);
-    return APPLECVA_OK;
+    return process_frame_lite_api(tracker, input_buffer, camera_parameters,
+                                  detected_faces, detected_face_count,
+                                  timestamp_seconds, lux_level, out_result);
 }
 
 int32_t AppleCVADetectFacesWithVisionOrientation(
