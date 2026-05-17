@@ -18,9 +18,7 @@
 #define APPLECVA_LITE_STACK_FACE_CAPACITY 8
 #define APPLECVA_FULL_MAX_INPUT_FACES 8
 #define APPLECVA_FULL_CALLBACK_TIMEOUT_NS NSEC_PER_SEC
-#define APPLECVA_FULL_FACE_DEFAULT_SMOOTHING 0.25f
-#define APPLECVA_FULL_FACE_DEFAULT_HOLD_FRAMES 15
-#define APPLECVA_FULL_FACE_MATCH_DISTANCE2 0.08f
+#define APPLECVA_DEFAULT_LUX_LEVEL 150
 
 static const float kAppleCVAFaceTrackingIntrinsicsWidth = 1440.0f;
 static const float kAppleCVAFaceTrackingIntrinsicsHeight = 1080.0f;
@@ -52,8 +50,6 @@ typedef uint32_t (*CVAFaceTrackingLiteGetAPIVersionFn)(void);
 typedef CFTypeID (*CVAFaceTrackingLiteGetTypeIDFn)(void);
 typedef CVAFaceTrackingLiteCreateOptions (
     *CVAFaceTrackingLiteGetDefaultCreateOptionsFn)(void);
-typedef CVAFaceTrackingLiteCreateOptions (
-    *CVAFaceTrackingLiteGetCreateOptionsForFeaturesFn)(bool, bool);
 typedef int32_t (*CVAFaceTrackingLiteCreateFn)(
     CFAllocatorRef, const CVAFaceTrackingLiteCreateOptions *,
     CVAFaceTrackingLiteRef *);
@@ -85,8 +81,6 @@ typedef struct {
     CVAFaceTrackingLiteGetAPIVersionFn get_api_version;
     CVAFaceTrackingLiteGetTypeIDFn get_type_id;
     CVAFaceTrackingLiteGetDefaultCreateOptionsFn get_default_create_options;
-    CVAFaceTrackingLiteGetCreateOptionsForFeaturesFn
-        get_create_options_for_features;
     CVAFaceTrackingLiteCreateFn create;
     CVAFaceTrackingLiteSetTimestampFn set_timestamp;
     CVAFaceTrackingLiteSetLuxLevelFn set_lux_level;
@@ -101,23 +95,16 @@ typedef struct {
 } AppleCVALiteAPI;
 
 typedef struct {
-    CFStringRef add_keypoints;
-    CFStringRef add_mesh;
     CFStringRef callback;
     CFStringRef color;
     CFStringRef color_meta_data;
-    CFStringRef color_only;
     CFStringRef camera_color;
-    CFStringRef detected_face_angle_pitch;
     CFStringRef detected_face_angle_roll;
-    CFStringRef detected_face_angle_yaw;
     CFStringRef detected_face_face_id;
     CFStringRef detected_face_rect;
     CFStringRef detected_faces_array;
     CFStringRef extrinsics;
     CFStringRef failure_fov_modifier;
-    CFStringRef fitting_enabled;
-    CFStringRef force_cpu;
     CFStringRef intrinsics;
     CFStringRef lux_level;
     CFStringRef meta;
@@ -129,8 +116,6 @@ typedef struct {
     CFStringRef rotation;
     CFStringRef timestamp;
     CFStringRef translation;
-    CFStringRef use_face_detector;
-    CFStringRef use_tongue;
 } AppleCVAFullKeys;
 
 typedef struct {
@@ -159,13 +144,6 @@ struct AppleCVATracker {
     CVAFaceTrackingLiteRef tracker;
     CVAFaceTrackingRef full_tracker;
     CFDictionaryRef full_last_output;
-    AppleCVADetectedFace full_input_faces[APPLECVA_FULL_MAX_INPUT_FACES];
-    size_t full_input_face_count;
-    size_t full_missing_detection_frames;
-    CVPixelBufferRef scratch_buffer;
-    size_t scratch_width;
-    size_t scratch_height;
-    OSType scratch_format;
 };
 
 static CFStringRef key_from_symbol(void *handle, const char *name) {
@@ -255,8 +233,6 @@ static bool load_api(AppleCVALiteAPI *api) {
         APPLECVA_LITE_SYMBOL(get_type_id, "CVAFaceTrackingLiteGetTypeID"),
         APPLECVA_LITE_SYMBOL(get_default_create_options,
                              "CVAFaceTrackingLiteGetDefaultCreateOptions"),
-        APPLECVA_LITE_SYMBOL(get_create_options_for_features,
-                             "CVAFaceTrackingLiteGetCreateOptionsForFeatures"),
         APPLECVA_LITE_SYMBOL(create, "CVAFaceTrackingLiteCreate"),
         APPLECVA_LITE_SYMBOL(set_timestamp, "CVAFaceTrackingLiteSetTimestamp"),
         APPLECVA_LITE_SYMBOL(set_lux_level, "CVAFaceTrackingLiteSetLuxLevel"),
@@ -299,24 +275,15 @@ static bool load_full_keys(AppleCVAFullAPI *api) {
     }
 
     const AppleCVAKeySpec key_specs[] = {
-        APPLECVA_REQUIRED_FULL_KEY(add_keypoints,
-                                   "kCVAFaceTracking_AddKeyPoints"),
-        APPLECVA_REQUIRED_FULL_KEY(add_mesh, "kCVAFaceTracking_AddMesh"),
         APPLECVA_REQUIRED_FULL_KEY(callback, "kCVAFaceTracking_Callback"),
         APPLECVA_REQUIRED_FULL_KEY(color, "kCVAFaceTracking_Color"),
         APPLECVA_REQUIRED_FULL_KEY(color_meta_data,
                                    "kCVAFaceTracking_ColorMetaData"),
-        APPLECVA_REQUIRED_FULL_KEY(color_only, "kCVAFaceTracking_ColorOnly"),
         APPLECVA_REQUIRED_FULL_KEY(camera_color,
                                    "kCVAFaceTracking_CameraColor"),
-        APPLECVA_OPTIONAL_FULL_KEY(
-            detected_face_angle_pitch,
-            "kCVAFaceTracking_DetectedFaceAngleInfoPitch"),
         APPLECVA_REQUIRED_FULL_KEY(
             detected_face_angle_roll,
             "kCVAFaceTracking_DetectedFaceAngleInfoRoll"),
-        APPLECVA_OPTIONAL_FULL_KEY(detected_face_angle_yaw,
-                                   "kCVAFaceTracking_DetectedFaceAngleInfoYaw"),
         APPLECVA_REQUIRED_FULL_KEY(detected_face_face_id,
                                    "kCVAFaceTracking_DetectedFaceFaceID"),
         APPLECVA_REQUIRED_FULL_KEY(detected_face_rect,
@@ -326,9 +293,6 @@ static bool load_full_keys(AppleCVAFullAPI *api) {
         APPLECVA_REQUIRED_FULL_KEY(extrinsics, "kCVAFaceTracking_Extrinsics"),
         APPLECVA_OPTIONAL_FULL_KEY(failure_fov_modifier,
                                    "kCVAFaceTracking_FailureFOVModifier"),
-        APPLECVA_REQUIRED_FULL_KEY(fitting_enabled,
-                                   "kCVAFaceTracking_FittingEnabled"),
-        APPLECVA_REQUIRED_FULL_KEY(force_cpu, "kCVAFaceTracking_ForceCPU"),
         APPLECVA_REQUIRED_FULL_KEY(intrinsics, "kCVAFaceTracking_Intrinsics"),
         APPLECVA_REQUIRED_FULL_KEY(lux_level, "kCVAFaceTracking_LuxLevel"),
         APPLECVA_REQUIRED_FULL_KEY(meta, "kCVAFaceTracking_Meta"),
@@ -339,15 +303,12 @@ static bool load_full_keys(AppleCVAFullAPI *api) {
             "kCVAFaceTracking_NetworkFailureThresholdMultiplier"),
         APPLECVA_REQUIRED_FULL_KEY(num_tracked_faces,
                                    "kCVAFaceTracking_NumTrackedFaces"),
+        APPLECVA_OPTIONAL_FULL_KEY(robust_tongue,
+                                   "kCVAFaceTracking_RobustTongue"),
         APPLECVA_REQUIRED_FULL_KEY(rotation, "kCVAFaceTracking_Rotation"),
         APPLECVA_REQUIRED_FULL_KEY(timestamp, "kCVAFaceTracking_Timestamp"),
         APPLECVA_REQUIRED_FULL_KEY(translation, "kCVAFaceTracking_Translation"),
-        APPLECVA_REQUIRED_FULL_KEY(use_face_detector,
-                                   "kCVAFaceTracking_UseFaceDetector"),
-        APPLECVA_OPTIONAL_FULL_KEY(robust_tongue,
-                                   "kCVAFaceTracking_RobustTongue"),
         APPLECVA_OPTIONAL_FULL_KEY(rgb_only, "kCVAFaceTracking_RGBOnly"),
-        APPLECVA_OPTIONAL_FULL_KEY(use_tongue, "kCVAFaceTracking_UseTongue"),
     };
 #undef APPLECVA_OPTIONAL_FULL_KEY
 #undef APPLECVA_REQUIRED_FULL_KEY
@@ -389,111 +350,15 @@ static void unload_full_api(AppleCVAFullAPI *api) {
     memset(api, 0, sizeof(*api));
 }
 
-static uint8_t clamp_u8(float value) {
-    if (value < 0.0f) {
-        return 0;
-    }
-    if (value > 255.0f) {
-        return 255;
-    }
-    return (uint8_t)(value + 0.5f);
-}
-
-typedef struct {
-    float r;
-    float g;
-    float b;
-} AppleCVARGB;
-
-typedef struct {
-    CVPixelBufferRef buffer;
-    CVPixelBufferLockFlags flags;
-    bool locked;
-} AppleCVAPixelBufferLock;
-
-static bool pixel_buffer_lock(AppleCVAPixelBufferLock *lock,
-                              CVPixelBufferRef buffer,
-                              CVPixelBufferLockFlags flags) {
-    lock->buffer = buffer;
-    lock->flags = flags;
-    lock->locked =
-        (CVPixelBufferLockBaseAddress(buffer, flags) == kCVReturnSuccess);
-    return lock->locked;
-}
-
-static void pixel_buffer_unlock(AppleCVAPixelBufferLock *lock) {
-    if (lock->locked) {
-        CVPixelBufferUnlockBaseAddress(lock->buffer, lock->flags);
-        lock->locked = false;
-    }
-}
-
-static AppleCVARGB make_rgb(float r, float g, float b) {
-    AppleCVARGB rgb = {r, g, b};
-    return rgb;
-}
-
-static AppleCVARGB rgb_from_packed_pixel(const uint8_t *pixel, OSType format) {
-    switch (format) {
-    case kCVPixelFormatType_32BGRA:
-        return make_rgb((float)pixel[2], (float)pixel[1], (float)pixel[0]);
-    case kCVPixelFormatType_32ARGB:
-        return make_rgb((float)pixel[1], (float)pixel[2], (float)pixel[3]);
-    case kCVPixelFormatType_32RGBA:
-        return make_rgb((float)pixel[0], (float)pixel[1], (float)pixel[2]);
-    default:
-        return make_rgb(0.0f, 0.0f, 0.0f);
-    }
-}
-
-static AppleCVARGB average_rgb4(AppleCVARGB a, AppleCVARGB b, AppleCVARGB c,
-                                AppleCVARGB d) {
-    return make_rgb((a.r + b.r + c.r + d.r) * 0.25f,
-                    (a.g + b.g + c.g + d.g) * 0.25f,
-                    (a.b + b.b + c.b + d.b) * 0.25f);
-}
-
-static float rgb_to_luma(AppleCVARGB rgb, bool full_range) {
-    if (full_range) {
-        return (0.2990f * rgb.r) + (0.5870f * rgb.g) + (0.1140f * rgb.b);
-    }
-    return 16.0f +
-           ((65.481f * rgb.r) + (128.553f * rgb.g) + (24.966f * rgb.b)) /
-               255.0f;
-}
-
-static void rgb_to_chroma(AppleCVARGB rgb, bool full_range, float *out_cb,
-                          float *out_cr) {
-    if (full_range) {
-        *out_cb = (-0.168736f * rgb.r) - (0.331264f * rgb.g) +
-                  (0.500000f * rgb.b) + 128.0f;
-        *out_cr = (0.500000f * rgb.r) - (0.418688f * rgb.g) -
-                  (0.081312f * rgb.b) + 128.0f;
-        return;
-    }
-    *out_cb =
-        128.0f +
-        ((-37.797f * rgb.r) - (74.203f * rgb.g) + (112.000f * rgb.b)) / 255.0f;
-    *out_cr =
-        128.0f +
-        ((112.000f * rgb.r) - (93.786f * rgb.g) - (18.214f * rgb.b)) / 255.0f;
-}
-
 void AppleCVAConfigInit(AppleCVAConfig *config) {
     if (config == NULL) {
         return;
     }
     memset(config, 0, sizeof(*config));
-    config->use_feature_options = false;
-    config->enable_rgb_fallback_conversion = true;
-    config->prefer_full_range_nv12 = true;
-    config->focal_scale = 1.0f;
-    config->default_lux_level = 150;
     config->use_full_api = false;
 }
 
 void AppleCVAMakeDefaultCameraParameters(size_t width, size_t height,
-                                         float focal_scale,
                                          AppleCVACameraParameters *params) {
     if (params == NULL) {
         return;
@@ -507,9 +372,9 @@ void AppleCVAMakeDefaultCameraParameters(size_t width, size_t height,
     const float height_scale =
         (float)height / kAppleCVAFaceTrackingIntrinsicsHeight;
     params->intrinsics[0] =
-        kAppleCVAFaceTrackingIntrinsicsFx * width_scale * focal_scale;
+        kAppleCVAFaceTrackingIntrinsicsFx * width_scale;
     params->intrinsics[4] =
-        kAppleCVAFaceTrackingIntrinsicsFy * height_scale * focal_scale;
+        kAppleCVAFaceTrackingIntrinsicsFy * height_scale;
     params->intrinsics[2] = kAppleCVAFaceTrackingIntrinsicsCx * width_scale;
     params->intrinsics[5] = kAppleCVAFaceTrackingIntrinsicsCy * height_scale;
     params->intrinsics[8] = 1.0f;
@@ -560,8 +425,6 @@ const char *AppleCVAStatusString(int32_t status) {
         return "tracker creation failed";
     case APPLECVA_ERR_UNSUPPORTED_PIXEL_FORMAT:
         return "unsupported pixel format";
-    case APPLECVA_ERR_CONVERSION_FAILED:
-        return "pixel format conversion failed";
     case APPLECVA_ERR_DECODE_FAILED:
         return "decoded output unavailable";
     case APPLECVA_ERR_VISION_FAILED:
@@ -584,142 +447,13 @@ make_internal_camera_params(const AppleCVACameraParameters *source,
     memcpy(&destination->values[12], source->intrinsics, sizeof(float) * 9);
 }
 
-static OSType preferred_nv12_format(const AppleCVAConfig *config) {
-    return config->prefer_full_range_nv12
-               ? kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-               : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
-}
-
-static void tracker_release_scratch_buffer(AppleCVATracker *tracker) {
-    if (tracker->scratch_buffer != NULL) {
-        CVPixelBufferRelease(tracker->scratch_buffer);
-        tracker->scratch_buffer = NULL;
-        tracker->scratch_width = 0;
-        tracker->scratch_height = 0;
-        tracker->scratch_format = 0;
-    }
-}
-
-static bool ensure_scratch_buffer(AppleCVATracker *tracker, size_t width,
-                                  size_t height) {
-    const OSType format = preferred_nv12_format(&tracker->config);
-    if (tracker->scratch_buffer != NULL && tracker->scratch_width == width &&
-        tracker->scratch_height == height &&
-        tracker->scratch_format == format) {
-        return true;
-    }
-
-    tracker_release_scratch_buffer(tracker);
-
-    NSDictionary *attrs =
-        @{(__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{}};
-    CVReturn cv = CVPixelBufferCreate(kCFAllocatorDefault, width, height,
-                                      format, (__bridge CFDictionaryRef)attrs,
-                                      &tracker->scratch_buffer);
-    if (cv != kCVReturnSuccess || tracker->scratch_buffer == NULL) {
-        tracker->scratch_buffer = NULL;
-        return false;
-    }
-
-    tracker->scratch_width = width;
-    tracker->scratch_height = height;
-    tracker->scratch_format = format;
-    return true;
-}
-
-static bool convert_packed_to_nv12(AppleCVATracker *tracker,
-                                   CVPixelBufferRef source_buffer,
-                                   CVPixelBufferRef destination_buffer) {
-    const OSType source_format = CVPixelBufferGetPixelFormatType(source_buffer);
-    AppleCVAPixelBufferLock source_lock = {0};
-    AppleCVAPixelBufferLock destination_lock = {0};
-    if (!pixel_buffer_lock(&source_lock, source_buffer,
-                           kCVPixelBufferLock_ReadOnly)) {
-        return false;
-    }
-    if (!pixel_buffer_lock(&destination_lock, destination_buffer, 0)) {
-        pixel_buffer_unlock(&source_lock);
-        return false;
-    }
-
-    const size_t width = CVPixelBufferGetWidth(source_buffer);
-    const size_t height = CVPixelBufferGetHeight(source_buffer);
-    const uint8_t *src_base = CVPixelBufferGetBaseAddress(source_buffer);
-    const size_t src_stride = CVPixelBufferGetBytesPerRow(source_buffer);
-    uint8_t *y_plane =
-        CVPixelBufferGetBaseAddressOfPlane(destination_buffer, 0);
-    uint8_t *uv_plane =
-        CVPixelBufferGetBaseAddressOfPlane(destination_buffer, 1);
-    const size_t y_stride =
-        CVPixelBufferGetBytesPerRowOfPlane(destination_buffer, 0);
-    const size_t uv_stride =
-        CVPixelBufferGetBytesPerRowOfPlane(destination_buffer, 1);
-    const bool full_range = (preferred_nv12_format(&tracker->config) ==
-                             kCVPixelFormatType_420YpCbCr8BiPlanarFullRange);
-
-    for (size_t y = 0; y < height; ++y) {
-        const uint8_t *src_row = src_base + (y * src_stride);
-        uint8_t *dst_y = y_plane + (y * y_stride);
-        for (size_t x = 0; x < width; ++x) {
-            const AppleCVARGB rgb =
-                rgb_from_packed_pixel(src_row + (x * 4), source_format);
-            dst_y[x] = clamp_u8(rgb_to_luma(rgb, full_range));
-        }
-    }
-
-    for (size_t y = 0; y < height; y += 2) {
-        const size_t next_y = (y + 1 < height) ? (y + 1) : y;
-        const uint8_t *src_row0 = src_base + (y * src_stride);
-        const uint8_t *src_row1 = src_base + (next_y * src_stride);
-        uint8_t *dst_uv = uv_plane + ((y / 2) * uv_stride);
-        for (size_t x = 0; x < width; x += 2) {
-            const size_t next_x = (x + 1 < width) ? (x + 1) : x;
-            const AppleCVARGB rgb = average_rgb4(
-                rgb_from_packed_pixel(src_row0 + (x * 4), source_format),
-                rgb_from_packed_pixel(src_row0 + (next_x * 4), source_format),
-                rgb_from_packed_pixel(src_row1 + (x * 4), source_format),
-                rgb_from_packed_pixel(src_row1 + (next_x * 4), source_format));
-            float cb = 0.0f;
-            float cr = 0.0f;
-            rgb_to_chroma(rgb, full_range, &cb, &cr);
-            dst_uv[x] = clamp_u8(cb);
-            dst_uv[x + 1] = clamp_u8(cr);
-        }
-    }
-
-    pixel_buffer_unlock(&destination_lock);
-    pixel_buffer_unlock(&source_lock);
-    return true;
-}
-
-static int32_t prepare_input_buffer(AppleCVATracker *tracker,
-                                    CVPixelBufferRef input_buffer,
-                                    CVPixelBufferRef *out_buffer) {
+static int32_t validate_input_buffer(CVPixelBufferRef input_buffer) {
     const OSType input_format = CVPixelBufferGetPixelFormatType(input_buffer);
     if (input_format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
         input_format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) {
-        *out_buffer = input_buffer;
         return APPLECVA_OK;
     }
-
-    if (!tracker->config.enable_rgb_fallback_conversion) {
-        return APPLECVA_ERR_UNSUPPORTED_PIXEL_FORMAT;
-    }
-    if (input_format != kCVPixelFormatType_32BGRA &&
-        input_format != kCVPixelFormatType_32ARGB &&
-        input_format != kCVPixelFormatType_32RGBA) {
-        return APPLECVA_ERR_UNSUPPORTED_PIXEL_FORMAT;
-    }
-    if (!ensure_scratch_buffer(tracker, CVPixelBufferGetWidth(input_buffer),
-                               CVPixelBufferGetHeight(input_buffer))) {
-        return APPLECVA_ERR_CONVERSION_FAILED;
-    }
-    if (!convert_packed_to_nv12(tracker, input_buffer,
-                                tracker->scratch_buffer)) {
-        return APPLECVA_ERR_CONVERSION_FAILED;
-    }
-    *out_buffer = tracker->scratch_buffer;
-    return APPLECVA_OK;
+    return APPLECVA_ERR_UNSUPPORTED_PIXEL_FORMAT;
 }
 
 static CFTypeRef dictionary_get_typed_value(CFDictionaryRef dictionary,
@@ -1072,22 +806,10 @@ static void fill_tracked_face_from_dictionary(CFDictionaryRef dictionary,
     face->landmark_pair_count = face->landmark_float_count / 2;
 }
 
-static NSNumber *full_api_number_from_env(const char *name) {
-    const char *value = getenv(name);
-    if (value == NULL || value[0] == '\0') {
-        return nil;
-    }
-    char *end = NULL;
-    const double parsed = strtod(value, &end);
-    if (end == value || !isfinite(parsed)) {
-        return nil;
-    }
-    return @(parsed);
-}
-
 static uint32_t effective_lux_level(const AppleCVATracker *tracker,
                                     uint32_t lux_level) {
-    return (lux_level != 0) ? lux_level : tracker->config.default_lux_level;
+    (void)tracker;
+    return (lux_level != 0) ? lux_level : APPLECVA_DEFAULT_LUX_LEVEL;
 }
 
 static void tracker_apply_config(AppleCVATracker *tracker,
@@ -1096,13 +818,9 @@ static void tracker_apply_config(AppleCVATracker *tracker,
     if (config != NULL) {
         tracker->config = *config;
     }
-    if (tracker->config.focal_scale <= 0.0f) {
-        tracker->config.focal_scale = 1.0f;
-    }
 }
 
 static void tracker_release_runtime(AppleCVATracker *tracker) {
-    tracker_release_scratch_buffer(tracker);
     if (tracker->tracker != NULL) {
         CFRelease((CFTypeRef)tracker->tracker);
         tracker->tracker = NULL;
@@ -1119,56 +837,16 @@ static void tracker_release_runtime(AppleCVATracker *tracker) {
     unload_full_api(&tracker->full_api);
 }
 
-static void full_api_add_optional_tongue_options(NSMutableDictionary *options,
-                                                 const AppleCVAFullKeys *keys) {
-    options[ns_key_or_literal(keys->robust_tongue, CFSTR("robust_tongue"))] =
-        @YES;
-}
-
-static void full_api_add_network_options(NSMutableDictionary *options,
-                                         const AppleCVAFullKeys *keys) {
-    NSNumber *network_failure_multiplier =
-        full_api_number_from_env("APPLECVA_FULL_NETWORK_FAILURE_MULTIPLIER");
-    if (network_failure_multiplier == nil) {
-        network_failure_multiplier = @1.0;
-    }
-    if (network_failure_multiplier != nil) {
-        options[ns_key(keys->network_failure_threshold_multiplier)] =
-            network_failure_multiplier;
-        trace_log("full network failure multiplier=%s",
-                  network_failure_multiplier.description.UTF8String);
-    }
-}
-
-static void full_api_add_failure_fov_options(NSMutableDictionary *options,
-                                             const AppleCVAFullKeys *keys) {
-    NSNumber *failure_fov_modifier =
-        full_api_number_from_env("APPLECVA_FULL_FAILURE_FOV_MODIFIER");
-    if (failure_fov_modifier == nil) {
-        failure_fov_modifier = @0.5;
-    }
-    options[ns_key_or_literal(keys->failure_fov_modifier,
-                              CFSTR("failure_fov_modifier"))] =
-        failure_fov_modifier;
-    trace_log("full failure fov modifier=%s",
-              failure_fov_modifier.description.UTF8String);
-}
-
-static NSNumber *full_api_num_tracked_faces_option(void) {
-    NSNumber *num_tracked_faces =
-        full_api_number_from_env("APPLECVA_FULL_NUM_TRACKED_FACES");
-    return num_tracked_faces != nil ? num_tracked_faces : @1;
-}
-
 static NSMutableDictionary *
 full_api_create_options(const AppleCVAFullKeys *keys) {
     NSMutableDictionary *options = [@{
-        ns_key_or_literal(keys->rgb_only, CFSTR("rgb_only")) : @YES,
-        ns_key(keys->num_tracked_faces) : full_api_num_tracked_faces_option(),
+        ns_key(keys->num_tracked_faces) : @1,
+        ns_key(keys->network_failure_threshold_multiplier) : @1.0,
+        ns_key_or_literal(keys->failure_fov_modifier,
+                          CFSTR("failure_fov_modifier")) : @0.5,
+        ns_key_or_literal(keys->robust_tongue, CFSTR("robust_tongue")) : @YES,
     } mutableCopy];
-    full_api_add_optional_tongue_options(options, keys);
-    full_api_add_network_options(options, keys);
-    full_api_add_failure_fov_options(options, keys);
+    options[ns_key_or_literal(keys->rgb_only, CFSTR("rgb_only"))] = @YES;
     trace_log("full create options=%s", options.description.UTF8String);
     return options;
 }
@@ -1194,9 +872,7 @@ static int32_t tracker_create_lite_backend(AppleCVATracker *tracker) {
     }
 
     const CVAFaceTrackingLiteCreateOptions options =
-        tracker->config.use_feature_options
-            ? tracker->api.get_create_options_for_features(true, true)
-            : tracker->api.get_default_create_options();
+        tracker->api.get_default_create_options();
     const int32_t status =
         tracker->api.create(kCFAllocatorDefault, &options, &tracker->tracker);
     if (status != 0 || tracker->tracker == NULL) {
@@ -1462,69 +1138,16 @@ static NSDictionary *full_api_time_dictionary(double timestamp_seconds) {
     return CFBridgingRelease(CMTimeCopyAsDictionary(time, kCFAllocatorDefault));
 }
 
-static float full_api_face_smoothing_alpha(void) {
-    const char *value = getenv("APPLECVA_FULL_FACE_SMOOTHING");
-    if (value == NULL || value[0] == '\0') {
-        return APPLECVA_FULL_FACE_DEFAULT_SMOOTHING;
-    }
-    const float alpha = strtof(value, NULL);
-    if (!(alpha >= 0.0f && alpha <= 1.0f)) {
-        return APPLECVA_FULL_FACE_DEFAULT_SMOOTHING;
-    }
-    return alpha;
-}
-
-static size_t full_api_face_hold_frames(void) {
-    const char *value = getenv("APPLECVA_FULL_FACE_HOLD");
-    if (value == NULL || value[0] == '\0') {
-        return APPLECVA_FULL_FACE_DEFAULT_HOLD_FRAMES;
-    }
-    char *end = NULL;
-    const unsigned long frames = strtoul(value, &end, 10);
-    if (end == value) {
-        return APPLECVA_FULL_FACE_DEFAULT_HOLD_FRAMES;
-    }
-    return (size_t)frames;
-}
-
-static float blend_float(float previous, float current, float alpha) {
-    return previous + ((current - previous) * alpha);
-}
-
 static bool detected_face_rect_is_plausible(const AppleCVADetectedFace *face) {
     return face != NULL && isfinite(face->x) && isfinite(face->y) &&
            isfinite(face->width) && isfinite(face->height) &&
            face->width > 0.0f && face->height > 0.0f;
 }
 
-static float detected_face_center_distance2(const AppleCVADetectedFace *a,
-                                            const AppleCVADetectedFace *b) {
-    const float ax = a->x + (a->width * 0.5f);
-    const float ay = a->y + (a->height * 0.5f);
-    const float bx = b->x + (b->width * 0.5f);
-    const float by = b->y + (b->height * 0.5f);
-    const float dx = ax - bx;
-    const float dy = ay - by;
-    return (dx * dx) + (dy * dy);
-}
-
-static void smooth_detected_face(AppleCVADetectedFace *destination,
-                                 const AppleCVADetectedFace *source,
-                                 float alpha) {
-    destination->x = blend_float(destination->x, source->x, alpha);
-    destination->y = blend_float(destination->y, source->y, alpha);
-    destination->width = blend_float(destination->width, source->width, alpha);
-    destination->height =
-        blend_float(destination->height, source->height, alpha);
-    destination->roll = blend_float(destination->roll, source->roll, alpha);
-}
-
 static size_t full_api_prepare_detected_faces(
-    AppleCVATracker *tracker, const AppleCVADetectedFace *detected_faces,
-    size_t detected_face_count, AppleCVADetectedFace *out_faces,
+    const AppleCVADetectedFace *detected_faces, size_t detected_face_count,
+    AppleCVADetectedFace *out_faces,
     size_t out_face_capacity) {
-    const size_t hold_frames = full_api_face_hold_frames();
-    const float alpha = full_api_face_smoothing_alpha();
     size_t valid_count = 0;
     const size_t input_limit = detected_face_count < out_face_capacity
                                    ? detected_face_count
@@ -1534,49 +1157,12 @@ static size_t full_api_prepare_detected_faces(
         if (!detected_face_rect_is_plausible(&detected_faces[i])) {
             continue;
         }
-        AppleCVADetectedFace face = detected_faces[i];
-        if (tracker->full_input_face_count != 0) {
-            size_t best_index = 0;
-            float best_distance = detected_face_center_distance2(
-                &face, &tracker->full_input_faces[0]);
-            for (size_t j = 1; j < tracker->full_input_face_count; ++j) {
-                const float distance = detected_face_center_distance2(
-                    &face, &tracker->full_input_faces[j]);
-                if (distance < best_distance) {
-                    best_distance = distance;
-                    best_index = j;
-                }
-            }
-            if (best_distance < APPLECVA_FULL_FACE_MATCH_DISTANCE2) {
-                AppleCVADetectedFace smoothed =
-                    tracker->full_input_faces[best_index];
-                smooth_detected_face(&smoothed, &face, alpha);
-                face = smoothed;
-            }
-        }
-        out_faces[valid_count++] = face;
+        out_faces[valid_count++] = detected_faces[i];
     }
 
-    if (valid_count != 0) {
-        memcpy(tracker->full_input_faces, out_faces,
-               valid_count * sizeof(*out_faces));
-        tracker->full_input_face_count = valid_count;
-        tracker->full_missing_detection_frames = 0;
-    } else if (tracker->full_input_face_count != 0 &&
-               tracker->full_missing_detection_frames < hold_frames) {
-        ++tracker->full_missing_detection_frames;
-        valid_count = tracker->full_input_face_count;
-        memcpy(out_faces, tracker->full_input_faces,
-               valid_count * sizeof(*out_faces));
-    } else {
-        tracker->full_input_face_count = 0;
-        tracker->full_missing_detection_frames = 0;
-    }
-
-    if (trace_enabled() && (detected_face_count != valid_count ||
-                            tracker->full_missing_detection_frames != 0)) {
-        trace_log("full faces raw=%zu used=%zu held=%zu", detected_face_count,
-                  valid_count, tracker->full_missing_detection_frames);
+    if (trace_enabled() && detected_face_count != valid_count) {
+        trace_log("full faces raw=%zu used=%zu", detected_face_count,
+                  valid_count);
     }
     return valid_count;
 }
@@ -1618,7 +1204,7 @@ process_frame_full_api(AppleCVATracker *tracker, CVPixelBufferRef input_buffer,
     NSDictionary *camera = full_api_camera_dictionary(keys, camera_parameters);
     AppleCVADetectedFace prepared_faces[APPLECVA_FULL_MAX_INPUT_FACES];
     const size_t prepared_face_count = full_api_prepare_detected_faces(
-        tracker, detected_faces, detected_face_count, prepared_faces,
+        detected_faces, detected_face_count, prepared_faces,
         sizeof(prepared_faces) / sizeof(prepared_faces[0]));
     NSArray *faces = full_api_detected_faces_array(keys, prepared_faces,
                                                    prepared_face_count);
@@ -1794,22 +1380,18 @@ int32_t AppleCVATrackerProcessFrame(
               timestamp_seconds, detected_face_count,
               (unsigned int)CVPixelBufferGetPixelFormatType(pixel_buffer));
 
-    CVPixelBufferRef input_buffer = NULL;
-    const int32_t wrapper_status =
-        prepare_input_buffer(tracker, pixel_buffer, &input_buffer);
+    const int32_t wrapper_status = validate_input_buffer(pixel_buffer);
     if (wrapper_status != APPLECVA_OK) {
-        trace_log("prepare_input_buffer failed: %d", wrapper_status);
+        trace_log("validate_input_buffer failed: %d", wrapper_status);
         return wrapper_status;
     }
-    trace_log("input prepared: format=0x%08x",
-              (unsigned int)CVPixelBufferGetPixelFormatType(input_buffer));
 
     if (tracker->config.use_full_api) {
-        return process_frame_full_api(tracker, input_buffer, camera_parameters,
+        return process_frame_full_api(tracker, pixel_buffer, camera_parameters,
                                       detected_faces, detected_face_count,
                                       timestamp_seconds, lux_level, out_result);
     }
-    return process_frame_lite_api(tracker, input_buffer, camera_parameters,
+    return process_frame_lite_api(tracker, pixel_buffer, camera_parameters,
                                   detected_faces, detected_face_count,
                                   timestamp_seconds, lux_level, out_result);
 }

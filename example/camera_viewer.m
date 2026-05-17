@@ -22,12 +22,9 @@ static bool gMirrorPreview = true;
 static bool gShowCameraPreview = true;
 static bool gFlipLandmarkShapeY = false;
 static bool gFaceRectUsesTopLeftOrigin = true;
-static bool gUseLowConfidenceResults = true;
 static bool gUseOneEuroFilter = false;
+static bool gUseFullBackend = false;
 static const uint32_t kVisionOrientation = 1;
-static const size_t kVisionDetectionInterval = 1;
-static const uint64_t kHeldFaceMaxFrames = 12;
-static const float kStableFaceMinConfidence = 0.5f;
 static const size_t kDisplayedBlendshapeCount = 8;
 static const float kBlendshapeDisplayThreshold = 0.01f;
 static const float kOneEuroMinCutoff = 1.2f;
@@ -103,12 +100,6 @@ static NSRect rect_for_normalized_face_rect(const float rect[4],
 static bool
 tracked_face_has_drawable_landmarks(const AppleCVATrackedFace *face) {
     return face != NULL && face->valid && face->landmark_pair_count >= 6;
-}
-
-static bool tracked_face_is_stable(const AppleCVATrackedFace *face) {
-    return tracked_face_has_drawable_landmarks(face) &&
-           face->failure_type == 0 &&
-           face->confidence >= kStableFaceMinConfidence;
 }
 
 typedef struct {
@@ -288,22 +279,6 @@ static NSString *status_string_for_code(int32_t status) {
         stringWithFormat:@"%s (%d)", AppleCVAStatusString(status), status];
 }
 
-static bool configured_use_full_api(void) {
-    return getenv("APPLECVA_FULL_API") != NULL;
-}
-
-static size_t configured_vision_detection_interval(void) {
-    const char *value = getenv("APPLECVA_VISION_INTERVAL");
-    if (value != NULL && value[0] != '\0') {
-        char *end = NULL;
-        const unsigned long parsed = strtoul(value, &end, 10);
-        if (end != value && parsed > 0) {
-            return (size_t)parsed;
-        }
-    }
-    return configured_use_full_api() ? 6 : kVisionDetectionInterval;
-}
-
 static bool
 copy_camera_intrinsics_from_sample_buffer(CMSampleBufferRef sample_buffer,
                                           AppleCVACameraParameters *params) {
@@ -343,7 +318,7 @@ static void
 update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
                                             size_t width, size_t height,
                                             AppleCVACameraParameters *params) {
-    AppleCVAMakeDefaultCameraParameters(width, height, 1.0f, params);
+    AppleCVAMakeDefaultCameraParameters(width, height, params);
     (void)copy_camera_intrinsics_from_sample_buffer(sample_buffer, params);
 }
 
@@ -356,7 +331,6 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
 @property(nonatomic, assign) int32_t lastStatus;
 @property(nonatomic, copy) NSString *message;
 @property(nonatomic, assign) double fps;
-@property(nonatomic, assign) uint64_t badFrameCount;
 - (void)updateWithPixelBuffer:(CVPixelBufferRef)pixelBuffer
                          face:(const AppleCVATrackedFace *)face
                       hasFace:(BOOL)hasFace
@@ -364,8 +338,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
              trackedFaceCount:(size_t)trackedFaceCount
                    lastStatus:(int32_t)lastStatus
                       message:(NSString *)message
-                          fps:(double)fps
-                badFrameCount:(uint64_t)badFrameCount;
+                          fps:(double)fps;
 @end
 
 @implementation FaceOverlayView {
@@ -419,11 +392,6 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
         self.needsDisplay = YES;
         return;
     }
-    if ([characters isEqualToString:@"l"]) {
-        gUseLowConfidenceResults = !gUseLowConfidenceResults;
-        self.needsDisplay = YES;
-        return;
-    }
     if ([characters isEqualToString:@"e"]) {
         gUseOneEuroFilter = !gUseOneEuroFilter;
         self.needsDisplay = YES;
@@ -458,8 +426,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
              trackedFaceCount:(size_t)trackedFaceCount
                    lastStatus:(int32_t)lastStatus
                       message:(NSString *)message
-                          fps:(double)fps
-                badFrameCount:(uint64_t)badFrameCount {
+                          fps:(double)fps {
     self.pixelBuffer = pixelBuffer;
     memset(&_face, 0, sizeof(_face));
     if (face != NULL) {
@@ -471,7 +438,6 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
     _lastStatus = lastStatus;
     self.message = message ?: @"";
     _fps = fps;
-    _badFrameCount = badFrameCount;
     self.needsDisplay = YES;
 }
 
@@ -738,13 +704,9 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
         if (!gShowCameraPreview) {
             [text appendString:@"  preview off"];
         }
-        [text appendFormat:@"\nlow-confidence %@  one-euro %@",
-                           gUseLowConfidenceResults ? @"on" : @"off",
+        [text appendFormat:@"\nbackend %@  one-euro %@",
+                           gUseFullBackend ? @"full" : @"lite",
                            gUseOneEuroFilter ? @"on" : @"off"];
-        if (self.badFrameCount != 0) {
-            [text appendFormat:@"  bad %llu",
-                               (unsigned long long)self.badFrameCount];
-        }
         if (self.hasFace) {
             [text appendFormat:@"  confidence %.3f  failure %d",
                                self.face.confidence, self.face.failure_type];
@@ -797,10 +759,6 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
     double _fps;
     BOOL _hasFirstFrameTimestamp;
     double _firstFrameTimestamp;
-    BOOL _hasLastGoodFace;
-    AppleCVATrackedFace _lastGoodFace;
-    uint64_t _lastGoodFaceFrameIndex;
-    uint64_t _consecutiveBadFrames;
     FaceOneEuroFilter _faceFilter;
     BOOL _lastOneEuroFilterEnabled;
 }
@@ -833,8 +791,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
                     trackedFaceCount:0
                           lastStatus:_lastStatus
                              message:@"AppleCVA tracker creation failed."
-                                 fps:0.0
-                       badFrameCount:0];
+                                 fps:0.0];
         return;
     }
 
@@ -864,8 +821,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
 
     AppleCVAConfig config;
     AppleCVAConfigInit(&config);
-    config.enable_rgb_fallback_conversion = true;
-    config.use_full_api = configured_use_full_api();
+    config.use_full_api = gUseFullBackend;
     return AppleCVATrackerCreate(&config, &_tracker);
 }
 
@@ -886,8 +842,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
                 trackedFaceCount:0
                       lastStatus:APPLECVA_OK
                          message:@"Camera access was denied."
-                             fps:0.0
-                   badFrameCount:0];
+                             fps:0.0];
 }
 
 - (void)startCaptureSession {
@@ -902,8 +857,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
                     trackedFaceCount:0
                           lastStatus:APPLECVA_OK
                              message:@"No video capture device found."
-                                 fps:0.0
-                       badFrameCount:0];
+                                 fps:0.0];
         return;
     }
 
@@ -917,15 +871,14 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
                     trackedFaceCount:0
                           lastStatus:APPLECVA_OK
                              message:error.localizedDescription
-                                 fps:0.0
-                       badFrameCount:0];
+                                 fps:0.0];
         return;
     }
 
     _session = [[AVCaptureSession alloc] init];
-    _session.sessionPreset = configured_use_full_api()
-                                 ? AVCaptureSessionPreset640x480
-                                 : AVCaptureSessionPreset1280x720;
+    _session.sessionPreset =
+        gUseFullBackend ? AVCaptureSessionPreset640x480
+                        : AVCaptureSessionPreset1280x720;
     if ([_session canAddInput:input]) {
         [_session addInput:input];
     }
@@ -949,8 +902,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
                 trackedFaceCount:0
                       lastStatus:APPLECVA_OK
                          message:@"Waiting for face..."
-                             fps:0.0
-                   badFrameCount:0];
+                             fps:0.0];
 
     [_session startRunning];
 }
@@ -979,16 +931,13 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
     update_camera_parameters_from_sample_buffer(sampleBuffer, width, height,
                                                 &_cameraParameters);
 
-    const size_t detectionInterval = configured_vision_detection_interval();
-    if ((_frameIndex % detectionInterval) == 0 || _detectedFaceCount == 0) {
-        size_t detectedFaceCount = 0;
-        const int32_t detectStatus = AppleCVADetectFacesWithVisionOrientation(
-            pixelBuffer, kVisionOrientation, _detectedFaces,
-            sizeof(_detectedFaces) / sizeof(_detectedFaces[0]),
-            &detectedFaceCount);
-        if (detectStatus == APPLECVA_OK) {
-            _detectedFaceCount = detectedFaceCount;
-        }
+    size_t detectedFaceCount = 0;
+    const int32_t detectStatus = AppleCVADetectFacesWithVisionOrientation(
+        pixelBuffer, kVisionOrientation, _detectedFaces,
+        sizeof(_detectedFaces) / sizeof(_detectedFaces[0]),
+        &detectedFaceCount);
+    if (detectStatus == APPLECVA_OK) {
+        _detectedFaceCount = detectedFaceCount;
     }
 
     AppleCVATrackedFace trackedFaces[4];
@@ -1033,60 +982,11 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
         }
     }
 
-    const BOOL hasDetectedFace =
-        (result.detected_face_count != 0 || _detectedFaceCount != 0);
-    const BOOL hasLiveFace = hasFace;
-    const BOOL hasStableLiveFace =
-        hasLiveFace && tracked_face_is_stable(&bestFace);
-    const BOOL canUseLowConfidenceFace = gUseLowConfidenceResults;
-    BOOL usingHeldFace = NO;
-    BOOL usingLowConfidenceFace = NO;
-    BOOL ignoringLowConfidenceFace = NO;
-    if (hasStableLiveFace) {
-        _lastGoodFace = bestFace;
-        _hasLastGoodFace = YES;
-        _lastGoodFaceFrameIndex = _frameIndex;
-    }
-    if (hasStableLiveFace || (hasLiveFace && canUseLowConfidenceFace)) {
-        _consecutiveBadFrames = 0;
-    } else if (hasDetectedFace || hasLiveFace) {
-        ++_consecutiveBadFrames;
-    } else {
-        _consecutiveBadFrames = 0;
-    }
-
     AppleCVATrackedFace displayFace;
     memset(&displayFace, 0, sizeof(displayFace));
-    BOOL hasDisplayFace = NO;
-    if (hasStableLiveFace) {
+    BOOL hasDisplayFace = hasFace;
+    if (hasDisplayFace) {
         displayFace = bestFace;
-        hasDisplayFace = YES;
-    } else if (hasLiveFace && canUseLowConfidenceFace) {
-        displayFace = bestFace;
-        hasDisplayFace = YES;
-        usingLowConfidenceFace = YES;
-    } else if (hasLiveFace) {
-        ignoringLowConfidenceFace = YES;
-        if (_hasLastGoodFace &&
-            (_frameIndex - _lastGoodFaceFrameIndex) <= kHeldFaceMaxFrames) {
-            displayFace = _lastGoodFace;
-            hasDisplayFace = YES;
-            usingHeldFace = YES;
-        } else if (_hasLastGoodFace) {
-            _hasLastGoodFace = NO;
-            memset(&_lastGoodFace, 0, sizeof(_lastGoodFace));
-        }
-    } else if (_hasLastGoodFace && hasDetectedFace &&
-               (_frameIndex - _lastGoodFaceFrameIndex) <= kHeldFaceMaxFrames) {
-        displayFace = _lastGoodFace;
-        hasDisplayFace = YES;
-        usingHeldFace = YES;
-    } else if (_hasLastGoodFace && hasDetectedFace) {
-        _hasLastGoodFace = NO;
-        memset(&_lastGoodFace, 0, sizeof(_lastGoodFace));
-    } else if (!hasDetectedFace) {
-        _hasLastGoodFace = NO;
-        memset(&_lastGoodFace, 0, sizeof(_lastGoodFace));
     }
 
     const BOOL oneEuroFilterEnabled = gUseOneEuroFilter;
@@ -1105,20 +1005,8 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
     ++_frameIndex;
     [self updateFps];
 
-    NSString *message = nil;
-    if (usingHeldFace) {
-        message = @"Holding last stable face.";
-    } else if (usingLowConfidenceFace) {
-        message = @"Low confidence tracking.";
-    } else if (ignoringLowConfidenceFace) {
-        message = @"Ignoring low confidence tracking.";
-    } else if (hasDisplayFace) {
-        message = @"Tracking face.";
-    } else {
-        message = @"Waiting for face...";
-    }
+    NSString *message = hasDisplayFace ? @"Tracking face." : @"Waiting for face...";
     const int32_t displayStatus = _lastStatus;
-    const uint64_t displayBadFrameCount = _consecutiveBadFrames;
     const size_t displayDetectedFaceCount = result.detected_face_count;
     const size_t displayTrackedFaceCount = result.tracked_face_count;
     const double displayFps = _fps;
@@ -1132,8 +1020,7 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
                   trackedFaceCount:displayTrackedFaceCount
                         lastStatus:displayStatus
                            message:message
-                               fps:displayFps
-                     badFrameCount:displayBadFrameCount];
+                               fps:displayFps];
       CVPixelBufferRelease(pixelBuffer);
     });
 }
@@ -1157,8 +1044,14 @@ update_camera_parameters_from_sample_buffer(CMSampleBufferRef sample_buffer,
 @end
 
 int main(int argc, const char *argv[]) {
-    (void)argc;
-    (void)argv;
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--full") == 0) {
+            gUseFullBackend = true;
+        } else if (strcmp(argv[i], "--lite") == 0) {
+            gUseFullBackend = false;
+        }
+    }
+
     @autoreleasepool {
         NSApplication *application = [NSApplication sharedApplication];
         AppDelegate *delegate = [[AppDelegate alloc] init];

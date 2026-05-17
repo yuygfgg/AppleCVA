@@ -18,7 +18,6 @@ enum {
     APPLECVA_ERR_SYMBOL_BIND = 2,
     APPLECVA_ERR_CREATE_TRACKER = 3,
     APPLECVA_ERR_UNSUPPORTED_PIXEL_FORMAT = 4,
-    APPLECVA_ERR_CONVERSION_FAILED = 5,
     APPLECVA_ERR_DECODE_FAILED = 6,
     APPLECVA_ERR_VISION_FAILED = 7,
     APPLECVA_ERR_BUFFER_TOO_SMALL = 8,
@@ -89,16 +88,6 @@ typedef struct AppleCVATracker AppleCVATracker;
 
 /** Tracker configuration used at creation time. */
 typedef struct {
-    /** Use Lite feature create-options instead of the default Lite options blob. */
-    bool use_feature_options;
-    /** Convert packed RGB formats to NV12 internally when needed. */
-    bool enable_rgb_fallback_conversion;
-    /** Prefer full-range NV12 (`420f`) for fallback conversion. */
-    bool prefer_full_range_nv12;
-    /** Fallback focal-length scale used by AppleCVAMakeDefaultCameraParameters. */
-    float focal_scale;
-    /** Lux value passed when per-frame lux is zero. */
-    uint32_t default_lux_level;
     /** Use the NSDictionary-based full AppleCVA face tracking backend. */
     bool use_full_api;
 } AppleCVAConfig;
@@ -199,9 +188,8 @@ typedef struct {
 /** Fill a config with conservative defaults. */
 void AppleCVAConfigInit(AppleCVAConfig* config);
 
-/** Build identity extrinsics and scaled ARKit FaceTracking fallback RGB intrinsics. */
+/** Build identity extrinsics and ARKit FaceTracking RGB intrinsics scaled to the frame size. */
 void AppleCVAMakeDefaultCameraParameters(size_t width, size_t height,
-                                         float focal_scale,
                                          AppleCVACameraParameters* params);
 
 /** Attach caller-owned tracked-face storage to a frame result. */
@@ -243,8 +231,7 @@ int32_t AppleCVATrackerCopyRawDecodedOutput(AppleCVATracker* tracker,
 /**
  * Process one frame through AppleCVA.
  *
- * `pixel_buffer` may be NV12 (`420f` or `420v`). Packed BGRA, ARGB, and RGBA
- * are accepted when fallback conversion is enabled in AppleCVAConfig.
+ * `pixel_buffer` must be NV12 (`420f` or `420v`).
  * `detected_faces` are normalized bottom-left rectangles; the full backend
  * converts them to its required input coordinate convention internally.
  */
