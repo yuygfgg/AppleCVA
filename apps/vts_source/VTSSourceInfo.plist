@@ -4,12 +4,12 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>local.applecva.camera-viewer</string>
+    <string>local.applecva.vts-source</string>
     <key>CFBundleName</key>
-    <string>AppleCVA Camera Viewer</string>
+    <string>AppleCVA VTS Source</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
     <key>NSCameraUsageDescription</key>
-    <string>AppleCVA Camera Viewer uses the camera to visualize face tracking landmarks.</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
+    <string>AppleCVA VTS Source uses the camera to send tracking data to VTube Studio.</string>
 </dict>
 </plist>
