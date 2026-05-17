@@ -24,6 +24,8 @@ The camera viewer window must be focused.
 | `p` | Toggle camera preview visibility while keeping the overlay/status text.                                     |
 | `y` | Toggle landmark Y-axis flip within the detected landmark bounds.                                            |
 | `b` | Toggle face rectangle and landmark coordinate origin handling between top-left and bottom-left conventions. |
+| `l` | Toggle whether low-confidence tracking results are used.                                                    |
+| `e` | Toggle One Euro Filter smoothing for the displayed tracking result.                                         |
 
 ## Build & Run
 

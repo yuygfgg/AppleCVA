@@ -21,12 +21,17 @@ static bool gMirrorPreview = true;
 static bool gShowCameraPreview = true;
 static bool gFlipLandmarkShapeY = false;
 static bool gFaceRectUsesTopLeftOrigin = true;
+static bool gUseLowConfidenceResults = true;
+static bool gUseOneEuroFilter = false;
 static const uint32_t kVisionOrientation = 1;
 static const size_t kVisionDetectionInterval = 1;
 static const uint64_t kHeldFaceMaxFrames = 12;
 static const float kStableFaceMinConfidence = 0.5f;
 static const size_t kDisplayedBlendshapeCount = 8;
 static const float kBlendshapeDisplayThreshold = 0.01f;
+static const float kOneEuroMinCutoff = 1.2f;
+static const float kOneEuroBeta = 0.003f;
+static const float kOneEuroDerivativeCutoff = 1.0f;
 
 static const LandmarkEdge kLandmarkEdges[] = {
     {0, 2},   {2, 3},   {3, 1},   {1, 5},   {5, 4},   {4, 0},   {0, 6},
@@ -103,6 +108,178 @@ static bool tracked_face_is_stable(const AppleCVATrackedFace *face) {
     return tracked_face_has_drawable_landmarks(face) &&
            face->failure_type == 0 &&
            face->confidence >= kStableFaceMinConfidence;
+}
+
+typedef struct {
+    bool initialized;
+    float value;
+    float derivative;
+} OneEuroScalarFilter;
+
+typedef struct {
+    bool initialized;
+    bool has_timestamp;
+    double previous_timestamp;
+    char face_id[APPLECVA_FACE_ID_CAPACITY];
+    OneEuroScalarFilter rect[4];
+    OneEuroScalarFilter angle_roll;
+    OneEuroScalarFilter gaze[3];
+    OneEuroScalarFilter raw_gaze[3];
+    OneEuroScalarFilter smooth_gaze[3];
+    OneEuroScalarFilter left_eye[3];
+    OneEuroScalarFilter right_eye[3];
+    OneEuroScalarFilter left_eye_pitch;
+    OneEuroScalarFilter left_eye_yaw;
+    OneEuroScalarFilter right_eye_pitch;
+    OneEuroScalarFilter right_eye_yaw;
+    OneEuroScalarFilter tongue_out;
+    OneEuroScalarFilter raw_rotation[9];
+    OneEuroScalarFilter raw_translation[3];
+    OneEuroScalarFilter smooth_rotation[9];
+    OneEuroScalarFilter smooth_translation[3];
+    OneEuroScalarFilter raw_blendshapes[APPLECVA_MAX_BLENDSHAPES];
+    OneEuroScalarFilter blendshapes[APPLECVA_MAX_BLENDSHAPES];
+    OneEuroScalarFilter smooth_blendshapes[APPLECVA_MAX_BLENDSHAPES];
+    OneEuroScalarFilter landmarks[APPLECVA_MAX_LANDMARK_FLOATS];
+} FaceOneEuroFilter;
+
+static float blend_float(float previous, float current, float alpha) {
+    return previous + ((current - previous) * alpha);
+}
+
+static float one_euro_alpha(float cutoff, double dt) {
+    if (!(cutoff > 0.0f) || !(dt > 0.0)) {
+        return 1.0f;
+    }
+    const double tau = 1.0 / (2.0 * M_PI * (double)cutoff);
+    return (float)(1.0 / (1.0 + (tau / dt)));
+}
+
+static float one_euro_filter_scalar(OneEuroScalarFilter *filter, float value,
+                                    double dt) {
+    if (filter == NULL || !isfinite(value)) {
+        return value;
+    }
+    if (!filter->initialized || !(dt > 0.0)) {
+        filter->initialized = true;
+        filter->value = value;
+        filter->derivative = 0.0f;
+        return value;
+    }
+
+    const float derivative = (value - filter->value) / (float)dt;
+    const float derivative_alpha = one_euro_alpha(kOneEuroDerivativeCutoff, dt);
+    filter->derivative =
+        blend_float(filter->derivative, derivative, derivative_alpha);
+    const float cutoff =
+        kOneEuroMinCutoff + (kOneEuroBeta * fabsf(filter->derivative));
+    const float value_alpha = one_euro_alpha(cutoff, dt);
+    filter->value = blend_float(filter->value, value, value_alpha);
+    return filter->value;
+}
+
+static void one_euro_filter_array(OneEuroScalarFilter *filters, float *values,
+                                  size_t count, double dt) {
+    if (filters == NULL || values == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        values[i] = one_euro_filter_scalar(&filters[i], values[i], dt);
+    }
+}
+
+static void face_one_euro_filter_reset(FaceOneEuroFilter *filter) {
+    if (filter != NULL) {
+        memset(filter, 0, sizeof(*filter));
+    }
+}
+
+static double face_one_euro_filter_dt(FaceOneEuroFilter *filter,
+                                      double timestamp) {
+    double dt = 1.0 / 30.0;
+    if (filter->has_timestamp && isfinite(timestamp)) {
+        dt = timestamp - filter->previous_timestamp;
+    }
+    if (!(dt > 0.0) || !isfinite(dt)) {
+        dt = 1.0 / 30.0;
+    } else if (dt < (1.0 / 240.0)) {
+        dt = 1.0 / 240.0;
+    } else if (dt > 0.1) {
+        dt = 0.1;
+    }
+    if (isfinite(timestamp)) {
+        filter->previous_timestamp = timestamp;
+        filter->has_timestamp = true;
+    }
+    return dt;
+}
+
+static void face_one_euro_filter_apply(FaceOneEuroFilter *filter,
+                                       AppleCVATrackedFace *face,
+                                       double timestamp) {
+    if (filter == NULL || face == NULL) {
+        return;
+    }
+    if (filter->initialized && filter->face_id[0] != '\0' &&
+        face->face_id[0] != '\0' &&
+        strcmp(filter->face_id, face->face_id) != 0) {
+        face_one_euro_filter_reset(filter);
+    }
+    if (!filter->initialized) {
+        filter->initialized = true;
+        if (face->face_id[0] != '\0') {
+            strlcpy(filter->face_id, face->face_id, sizeof(filter->face_id));
+        }
+    }
+
+    const double dt = face_one_euro_filter_dt(filter, timestamp);
+    one_euro_filter_array(filter->rect, face->rect, 4, dt);
+    face->angle_roll =
+        one_euro_filter_scalar(&filter->angle_roll, face->angle_roll, dt);
+    one_euro_filter_array(filter->gaze, face->gaze, 3, dt);
+    one_euro_filter_array(filter->raw_gaze, face->raw_gaze, 3, dt);
+    one_euro_filter_array(filter->smooth_gaze, face->smooth_gaze, 3, dt);
+    one_euro_filter_array(filter->left_eye, face->left_eye, 3, dt);
+    one_euro_filter_array(filter->right_eye, face->right_eye, 3, dt);
+    face->left_eye_pitch = one_euro_filter_scalar(&filter->left_eye_pitch,
+                                                  face->left_eye_pitch, dt);
+    face->left_eye_yaw =
+        one_euro_filter_scalar(&filter->left_eye_yaw, face->left_eye_yaw, dt);
+    face->right_eye_pitch = one_euro_filter_scalar(&filter->right_eye_pitch,
+                                                   face->right_eye_pitch, dt);
+    face->right_eye_yaw =
+        one_euro_filter_scalar(&filter->right_eye_yaw, face->right_eye_yaw, dt);
+    face->tongue_out =
+        one_euro_filter_scalar(&filter->tongue_out, face->tongue_out, dt);
+    one_euro_filter_array(filter->raw_rotation, face->raw_rotation, 9, dt);
+    one_euro_filter_array(filter->raw_translation, face->raw_translation, 3,
+                          dt);
+    one_euro_filter_array(filter->smooth_rotation, face->smooth_rotation, 9,
+                          dt);
+    one_euro_filter_array(filter->smooth_translation, face->smooth_translation,
+                          3, dt);
+    one_euro_filter_array(filter->raw_blendshapes, face->raw_blendshapes,
+                          face->raw_blendshape_count < APPLECVA_MAX_BLENDSHAPES
+                              ? face->raw_blendshape_count
+                              : APPLECVA_MAX_BLENDSHAPES,
+                          dt);
+    one_euro_filter_array(filter->blendshapes, face->blendshapes,
+                          face->blendshape_count < APPLECVA_MAX_BLENDSHAPES
+                              ? face->blendshape_count
+                              : APPLECVA_MAX_BLENDSHAPES,
+                          dt);
+    one_euro_filter_array(filter->smooth_blendshapes, face->smooth_blendshapes,
+                          face->smooth_blendshape_count <
+                                  APPLECVA_MAX_BLENDSHAPES
+                              ? face->smooth_blendshape_count
+                              : APPLECVA_MAX_BLENDSHAPES,
+                          dt);
+    one_euro_filter_array(filter->landmarks, face->landmarks,
+                          face->landmark_float_count <
+                                  APPLECVA_MAX_LANDMARK_FLOATS
+                              ? face->landmark_float_count
+                              : APPLECVA_MAX_LANDMARK_FLOATS,
+                          dt);
 }
 
 static NSString *status_string_for_code(int32_t status) {
@@ -191,6 +368,16 @@ static size_t configured_vision_detection_interval(void) {
     }
     if ([characters isEqualToString:@"b"]) {
         gFaceRectUsesTopLeftOrigin = !gFaceRectUsesTopLeftOrigin;
+        self.needsDisplay = YES;
+        return;
+    }
+    if ([characters isEqualToString:@"l"]) {
+        gUseLowConfidenceResults = !gUseLowConfidenceResults;
+        self.needsDisplay = YES;
+        return;
+    }
+    if ([characters isEqualToString:@"e"]) {
+        gUseOneEuroFilter = !gUseOneEuroFilter;
         self.needsDisplay = YES;
         return;
     }
@@ -503,6 +690,9 @@ static size_t configured_vision_detection_interval(void) {
         if (!gShowCameraPreview) {
             [text appendString:@"  preview off"];
         }
+        [text appendFormat:@"\nlow-confidence %@  one-euro %@",
+                           gUseLowConfidenceResults ? @"on" : @"off",
+                           gUseOneEuroFilter ? @"on" : @"off"];
         if (self.badFrameCount != 0) {
             [text appendFormat:@"  bad %llu",
                                (unsigned long long)self.badFrameCount];
@@ -563,6 +753,8 @@ static size_t configured_vision_detection_interval(void) {
     AppleCVATrackedFace _lastGoodFace;
     uint64_t _lastGoodFaceFrameIndex;
     uint64_t _consecutiveBadFrames;
+    FaceOneEuroFilter _faceFilter;
+    BOOL _lastOneEuroFilterEnabled;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -797,16 +989,18 @@ static size_t configured_vision_detection_interval(void) {
     const BOOL hasLiveFace = hasFace;
     const BOOL hasStableLiveFace =
         hasLiveFace && tracked_face_is_stable(&bestFace);
+    const BOOL canUseLowConfidenceFace = gUseLowConfidenceResults;
     BOOL usingHeldFace = NO;
     BOOL usingLowConfidenceFace = NO;
+    BOOL ignoringLowConfidenceFace = NO;
     if (hasStableLiveFace) {
         _lastGoodFace = bestFace;
         _hasLastGoodFace = YES;
         _lastGoodFaceFrameIndex = _frameIndex;
     }
-    if (hasLiveFace) {
+    if (hasStableLiveFace || (hasLiveFace && canUseLowConfidenceFace)) {
         _consecutiveBadFrames = 0;
-    } else if (hasDetectedFace) {
+    } else if (hasDetectedFace || hasLiveFace) {
         ++_consecutiveBadFrames;
     } else {
         _consecutiveBadFrames = 0;
@@ -818,10 +1012,21 @@ static size_t configured_vision_detection_interval(void) {
     if (hasStableLiveFace) {
         displayFace = bestFace;
         hasDisplayFace = YES;
-    } else if (hasLiveFace) {
+    } else if (hasLiveFace && canUseLowConfidenceFace) {
         displayFace = bestFace;
         hasDisplayFace = YES;
         usingLowConfidenceFace = YES;
+    } else if (hasLiveFace) {
+        ignoringLowConfidenceFace = YES;
+        if (_hasLastGoodFace &&
+            (_frameIndex - _lastGoodFaceFrameIndex) <= kHeldFaceMaxFrames) {
+            displayFace = _lastGoodFace;
+            hasDisplayFace = YES;
+            usingHeldFace = YES;
+        } else if (_hasLastGoodFace) {
+            _hasLastGoodFace = NO;
+            memset(&_lastGoodFace, 0, sizeof(_lastGoodFace));
+        }
     } else if (_hasLastGoodFace && hasDetectedFace &&
                (_frameIndex - _lastGoodFaceFrameIndex) <= kHeldFaceMaxFrames) {
         displayFace = _lastGoodFace;
@@ -835,6 +1040,19 @@ static size_t configured_vision_detection_interval(void) {
         memset(&_lastGoodFace, 0, sizeof(_lastGoodFace));
     }
 
+    const BOOL oneEuroFilterEnabled = gUseOneEuroFilter;
+    if (!oneEuroFilterEnabled) {
+        if (_lastOneEuroFilterEnabled) {
+            face_one_euro_filter_reset(&_faceFilter);
+        }
+    } else if (!_lastOneEuroFilterEnabled || !hasDisplayFace) {
+        face_one_euro_filter_reset(&_faceFilter);
+    }
+    _lastOneEuroFilterEnabled = oneEuroFilterEnabled;
+    if (oneEuroFilterEnabled && hasDisplayFace) {
+        face_one_euro_filter_apply(&_faceFilter, &displayFace, timestamp);
+    }
+
     ++_frameIndex;
     [self updateFps];
 
@@ -843,6 +1061,8 @@ static size_t configured_vision_detection_interval(void) {
         message = @"Holding last stable face.";
     } else if (usingLowConfidenceFace) {
         message = @"Low confidence tracking.";
+    } else if (ignoringLowConfidenceFace) {
+        message = @"Ignoring low confidence tracking.";
     } else if (hasDisplayFace) {
         message = @"Tracking face.";
     } else {
