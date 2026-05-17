@@ -1,0 +1,69 @@
+name: macOS app prerelease
+
+on:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: write
+
+jobs:
+  commits:
+    if: github.event.deleted == false
+    runs-on: ubuntu-latest
+    outputs:
+      commits: ${{ steps.commits.outputs.commits }}
+
+    steps:
+      - name: Collect pushed commits
+        id: commits
+        env:
+          COMMITS_JSON: ${{ toJson(github.event.commits) }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          commits="$(printf '%s' "$COMMITS_JSON" | jq -c '[.[].id] | if length == 0 then [env.HEAD_SHA] else . end')"
+          echo "commits=$commits" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: commits
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        commit: ${{ fromJson(needs.commits.outputs.commits) }}
+
+    env:
+      BUILD_TYPE: Release
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.commit }}
+          fetch-depth: 0
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+          -DAPPLECVA_CODESIGN_IDENTITY="-"
+          -DCPACK_PACKAGE_FILE_NAME="AppleCVA-VTS-Source-${{ matrix.commit }}-macos"
+
+      - name: Build package
+        run: cmake --build build --config "$BUILD_TYPE" --target package --parallel
+
+      - name: Publish commit prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: prerelease-${{ matrix.commit }}
+          target_commitish: ${{ matrix.commit }}
+          name: AppleCVA VTS Source ${{ matrix.commit }}
+          body: Automated prerelease for commit ${{ matrix.commit }}.
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          files: |
+            build/*.zip
+            build/*.sha256

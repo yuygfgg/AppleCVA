@@ -1,8 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(AppleCVAVTSSource LANGUAGES OBJC)
+project(AppleCVAVTSSource VERSION 0.1.0 LANGUAGES OBJC)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_MACOSX_RPATH ON)
+
+set(APPLECVA_APP_NAME "AppleCVA VTS Source")
+set(APPLECVA_BUNDLE_IDENTIFIER "local.applecva.vts-source")
+set(APPLECVA_CODESIGN_IDENTITY "-"
+    CACHE STRING "Code signing identity for the macOS app bundle; '-' uses ad-hoc signing")
 
 set(APPLECVA_FRAMEWORKS
     Foundation
@@ -75,13 +81,56 @@ target_link_apple_frameworks(vts_source
         ${APPLECVA_FRAMEWORKS}
         ${VTS_SOURCE_FRAMEWORKS})
 
-target_link_options(vts_source
-    PRIVATE
-        -sectcreate
-        __TEXT
-        __info_plist
-        ${CMAKE_CURRENT_SOURCE_DIR}/apps/vts_source/VTSSourceInfo.plist)
-
 set_target_properties(vts_source
     PROPERTIES
-        BUILD_RPATH "@executable_path")
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "${APPLECVA_APP_NAME}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${APPLECVA_BUNDLE_IDENTIFIER}"
+        MACOSX_BUNDLE_INFO_PLIST
+            "${CMAKE_CURRENT_SOURCE_DIR}/apps/vts_source/VTSSourceInfo.plist"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        OUTPUT_NAME "${APPLECVA_APP_NAME}"
+        BUILD_RPATH "@executable_path/../Frameworks"
+        INSTALL_RPATH "@executable_path/../Frameworks")
+
+add_custom_command(TARGET vts_source POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_BUNDLE_DIR:vts_source>/Contents/Frameworks"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:applecva>"
+            "$<TARGET_BUNDLE_DIR:vts_source>/Contents/Frameworks/"
+    COMMAND /usr/bin/codesign --force --deep --sign
+            "${APPLECVA_CODESIGN_IDENTITY}"
+            "$<TARGET_BUNDLE_DIR:vts_source>"
+    COMMENT "Embedding applecva and signing the app bundle"
+    VERBATIM)
+
+add_custom_target(vts_source_codesign ALL
+    COMMAND /usr/bin/codesign --force --deep --sign
+            "${APPLECVA_CODESIGN_IDENTITY}"
+            "$<TARGET_BUNDLE_DIR:vts_source>"
+    DEPENDS vts_source
+    COMMENT "Signing the app bundle"
+    VERBATIM)
+
+install(TARGETS vts_source
+    BUNDLE DESTINATION ".")
+install(CODE "
+    execute_process(
+        COMMAND /usr/bin/codesign --force --deep --sign
+                \"${APPLECVA_CODESIGN_IDENTITY}\"
+                \"\${CMAKE_INSTALL_PREFIX}/${APPLECVA_APP_NAME}.app\"
+        COMMAND_ERROR_IS_FATAL ANY)
+")
+
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+set(CPACK_PACKAGE_CHECKSUM SHA256)
+set(CPACK_PACKAGE_FILE_NAME
+    "AppleCVA-VTS-Source-${PROJECT_VERSION}-macos"
+    CACHE STRING "Base file name for generated packages")
+set(CPACK_PACKAGE_NAME "AppleCVA-VTS-Source")
+set(CPACK_PACKAGE_VENDOR "AppleCVA")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+include(CPack)

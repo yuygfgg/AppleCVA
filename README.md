@@ -9,10 +9,24 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
+This builds `build/AppleCVA VTS Source.app`. To use a specific signing identity, configure with `-DAPPLECVA_CODESIGN_IDENTITY="Developer ID Application: ..."` instead.
+
+## Package App
+
+Build a local release zip containing the `.app` bundle:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --parallel
+cmake --build build --config Release --target package
+```
+
+The package is written to `build/AppleCVA-VTS-Source-0.1.0-macos.zip` with a matching SHA-256 checksum file.
+
 ## Run
 
 ```sh
-./build/vts_source
+open "build/AppleCVA VTS Source.app"
 ```
 
 Calibration is required before the app connects to VTube Studio or injects tracking parameters. Start the app, keep a neutral expression, look straight at the camera, and press `Calibrate First` button or `c` key.
