@@ -40,6 +40,8 @@ static float parameter_value_for_id(NSArray<NSDictionary *> *parameterValues,
     BOOL _useFullBackend;
     BOOL _enableFilter;
     BOOL _includeCustomParameters;
+    BOOL _includeARKitAliases;
+    BOOL _includeACVABlendshapeParameters;
     NSWindow *_window;
     AppleCVAOverlayView *_view;
     AppleCVATrackingPipeline *_pipeline;
@@ -48,10 +50,12 @@ static float parameter_value_for_id(NSArray<NSDictionary *> *parameterValues,
 }
 
 - (instancetype)initWithHost:(NSString *)host
-                        port:(uint16_t)port
-              useFullBackend:(BOOL)useFullBackend
-                enableFilter:(BOOL)enableFilter
-     includeCustomParameters:(BOOL)includeCustomParameters {
+                               port:(uint16_t)port
+                     useFullBackend:(BOOL)useFullBackend
+                       enableFilter:(BOOL)enableFilter
+            includeCustomParameters:(BOOL)includeCustomParameters
+                includeARKitAliases:(BOOL)includeARKitAliases
+    includeACVABlendshapeParameters:(BOOL)includeACVABlendshapeParameters {
     self = [super init];
     if (self != nil) {
         _host = [host copy] ?: @"127.0.0.1";
@@ -59,6 +63,8 @@ static float parameter_value_for_id(NSArray<NSDictionary *> *parameterValues,
         _useFullBackend = useFullBackend;
         _enableFilter = enableFilter;
         _includeCustomParameters = includeCustomParameters;
+        _includeARKitAliases = includeARKitAliases;
+        _includeACVABlendshapeParameters = includeACVABlendshapeParameters;
         _calibrationController = [[VTSCalibrationController alloc] init];
     }
     return self;
@@ -196,7 +202,8 @@ static float parameter_value_for_id(NSArray<NSDictionary *> *parameterValues,
             [client defaultParameterNamesSnapshot];
         parameterValues = VTSAppleCVAParameterValues(
             face, hasFace, defaultParameterNames, &calibrationSnapshot,
-            _includeCustomParameters);
+            _includeCustomParameters, _includeARKitAliases,
+            _includeACVABlendshapeParameters);
         [client injectParameterValues:parameterValues faceFound:hasFace];
     }
 
@@ -240,8 +247,11 @@ static float parameter_value_for_id(NSArray<NSDictionary *> *parameterValues,
         if (_vtsClient == nil) {
             _vtsClient =
                 [[VTSClient alloc] initWithHost:_host
-                                           port:_port
-                        includeCustomParameters:_includeCustomParameters];
+                                               port:_port
+                            includeCustomParameters:_includeCustomParameters
+                                includeARKitAliases:_includeARKitAliases
+                    includeACVABlendshapeParameters:
+                        _includeACVABlendshapeParameters];
             [_vtsClient start];
         }
         return _vtsClient;
@@ -267,17 +277,25 @@ static float parameter_value_for_id(NSArray<NSDictionary *> *parameterValues,
     (NSArray<NSDictionary *> *)parameterValues {
     NSString *customStatus =
         _includeCustomParameters ? @"custom on" : @"custom off";
+    NSString *aliasStatus = (_includeCustomParameters && _includeARKitAliases)
+                                ? @"aliases on"
+                                : @"aliases off";
+    NSString *acvaRawStatus =
+        (_includeCustomParameters && _includeACVABlendshapeParameters)
+            ? @"acva raw on"
+            : @"acva raw off";
     NSString *calibrationStatus = [_calibrationController statusLine];
     if (!_calibrationController.calibrated) {
-        return [NSString stringWithFormat:@"vts locked  %@  %@", customStatus,
-                                          calibrationStatus];
+        return [NSString stringWithFormat:@"vts locked  %@  %@  %@  %@",
+                                          customStatus, aliasStatus,
+                                          acvaRawStatus, calibrationStatus];
     }
 
     VTSClient *client = [self currentVTSClient];
     NSString *vtsStatus = client != nil ? [client statusLine] : @"vts starting";
-    NSString *base =
-        [NSString stringWithFormat:@"%@  %@  %@", vtsStatus, customStatus,
-                                   calibrationStatus];
+    NSString *base = [NSString
+        stringWithFormat:@"%@  %@  %@  %@  %@", vtsStatus, customStatus,
+                         aliasStatus, acvaRawStatus, calibrationStatus];
     if (parameterValues.count == 0) {
         return base;
     }

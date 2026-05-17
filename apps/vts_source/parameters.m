@@ -3,6 +3,8 @@
 #include <math.h>
 #include <string.h>
 
+static const size_t kVTSMaxCustomParameters = 100;
+
 static const char *const kCustomBlendshapeNames[APPLECVA_MAX_BLENDSHAPES] = {
     "ACVAEyeBlinkLeft",       "ACVAEyeBlinkRight",
     "ACVAEyeSquintLeft",      "ACVAEyeSquintRight",
@@ -31,6 +33,99 @@ static const char *const kCustomBlendshapeNames[APPLECVA_MAX_BLENDSHAPES] = {
     "ACVACheekPuff",          "ACVACheekSquintLeft",
     "ACVACheekSquintRight",
 };
+
+typedef struct {
+    size_t blendshapeIndex;
+    const char *name;
+} VTSAppleCVAIndexedParameterName;
+
+static const VTSAppleCVAIndexedParameterName kARKitAliasParameters[] = {
+    {0, "EyeBlinkLeft"},        {1, "EyeBlinkRight"},
+    {2, "EyeSquintLeft"},       {3, "EyeSquintRight"},
+    {4, "EyeLookDownLeft"},     {5, "EyeLookDownRight"},
+    {6, "EyeLookInLeft"},       {7, "EyeLookInRight"},
+    {8, "EyeWideLeft"},         {9, "EyeWideRight"},
+    {10, "EyeLookOutLeft"},     {11, "EyeLookOutRight"},
+    {12, "EyeLookUpLeft"},      {13, "EyeLookUpRight"},
+    {14, "BrowDownLeft"},       {15, "BrowDownRight"},
+    {16, "BrowInnerUp"},        {17, "BrowOuterUpLeft"},
+    {18, "BrowOuterUpRight"},   {19, "JawOpen"},
+    {20, "MouthClose"},         {21, "JawLeft"},
+    {22, "JawRight"},           {23, "JawForward"},
+    {24, "MouthUpperUpLeft"},   {25, "MouthUpperUpRight"},
+    {26, "MouthLowerDownLeft"}, {27, "MouthLowerDownRight"},
+    {28, "MouthRollUpper"},     {29, "MouthRollLower"},
+    {30, "MouthSmileLeft"},     {31, "MouthSmileRight"},
+    {32, "MouthDimpleLeft"},    {33, "MouthDimpleRight"},
+    {34, "MouthStretchLeft"},   {35, "MouthStretchRight"},
+    {36, "MouthFrownLeft"},     {37, "MouthFrownRight"},
+    {38, "MouthPressLeft"},     {39, "MouthPressRight"},
+    {40, "MouthPucker"},        {41, "MouthFunnel"},
+    {42, "MouthLeft"},          {43, "MouthRight"},
+    {44, "MouthShrugLower"},    {45, "MouthShrugUpper"},
+    {46, "NoseSneerLeft"},      {47, "NoseSneerRight"},
+    {48, "CheekPuff"},          {49, "CheekSquintLeft"},
+    {50, "CheekSquintRight"},
+};
+
+#define ARRAY_COUNT(values) (sizeof(values) / sizeof((values)[0]))
+
+static BOOL parameter_name_is_default(NSString *name,
+                                      NSSet<NSString *> *availableDefaults) {
+    return name != nil && [availableDefaults containsObject:name];
+}
+
+static size_t
+arkit_alias_custom_parameter_count(BOOL includeARKitAliases,
+                                   NSSet<NSString *> *availableDefaults) {
+    if (!includeARKitAliases) {
+        return 0;
+    }
+    size_t count = 0;
+    for (size_t i = 0; i < ARRAY_COUNT(kARKitAliasParameters); ++i) {
+        NSString *name =
+            [NSString stringWithUTF8String:kARKitAliasParameters[i].name];
+        if (!parameter_name_is_default(name, availableDefaults)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+static size_t
+acva_blendshape_parameter_count(BOOL includeARKitAliases,
+                                BOOL includeACVABlendshapeParameters,
+                                NSSet<NSString *> *availableDefaults) {
+    if (!includeACVABlendshapeParameters) {
+        return 0;
+    }
+    const size_t derivedACVAParameterCount = 17;
+    const size_t aliasCustomCount = arkit_alias_custom_parameter_count(
+        includeARKitAliases, availableDefaults);
+    const size_t reserved = derivedACVAParameterCount + aliasCustomCount;
+    if (reserved >= kVTSMaxCustomParameters) {
+        return 0;
+    }
+    const size_t available = kVTSMaxCustomParameters - reserved;
+    return APPLECVA_MAX_BLENDSHAPES < available ? APPLECVA_MAX_BLENDSHAPES
+                                                : available;
+}
+
+static void log_dropped_acva_blendshape_parameters(size_t includedCount) {
+    if (includedCount >= APPLECVA_MAX_BLENDSHAPES) {
+        return;
+    }
+
+    NSMutableArray<NSString *> *dropped = [NSMutableArray array];
+    for (size_t i = includedCount; i < APPLECVA_MAX_BLENDSHAPES; ++i) {
+        [dropped addObject:[NSString
+                               stringWithUTF8String:kCustomBlendshapeNames[i]]];
+    }
+    NSLog(@"WARNING: VTS custom parameter slots exhausted; skipped %lu raw "
+          @"ACVA blendshape parameters: %@",
+          (unsigned long)dropped.count,
+          [dropped componentsJoinedByString:@", "]);
+}
 
 typedef struct {
     float x;
@@ -269,6 +364,72 @@ static void face_rotation(const AppleCVATrackedFace *face, float *outPitch,
     }
 }
 
+static BOOL face_rect_values(const AppleCVATrackedFace *face, float *outCenterX,
+                             float *outCenterY, float *outSize) {
+    if (face == NULL) {
+        return NO;
+    }
+
+    const float x = face->rect[0];
+    const float y = face->rect[1];
+    const float width = face->rect[2];
+    const float height = face->rect[3];
+    if (!isfinite(x) || !isfinite(y) || !isfinite(width) || !isfinite(height) ||
+        width <= 0.0f || height <= 0.0f) {
+        return NO;
+    }
+
+    if (outCenterX != NULL) {
+        *outCenterX = x + (width * 0.5f);
+    }
+    if (outCenterY != NULL) {
+        *outCenterY = y + (height * 0.5f);
+    }
+    if (outSize != NULL) {
+        *outSize = sqrtf(width * height);
+    }
+    return YES;
+}
+
+static void
+calibrated_face_position_values(const AppleCVATrackedFace *face,
+                                const VTSAppleCVACalibration *calibration,
+                                float *outX, float *outY, float *outZ) {
+    if (outX != NULL) {
+        *outX = 0.0f;
+    }
+    if (outY != NULL) {
+        *outY = 0.0f;
+    }
+    if (outZ != NULL) {
+        *outZ = 0.0f;
+    }
+    if (face == NULL || calibration == NULL || !calibration->valid) {
+        return;
+    }
+
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    float size = 0.0f;
+    if (!face_rect_values(face, &centerX, &centerY, &size)) {
+        return;
+    }
+
+    if (outX != NULL) {
+        *outX = clampf((centerX - calibration->facePositionXZero) * 20.0f,
+                       -10.0f, 10.0f);
+    }
+    if (outY != NULL) {
+        *outY = clampf((centerY - calibration->facePositionYZero) * 20.0f,
+                       -10.0f, 10.0f);
+    }
+    if (outZ != NULL && calibration->facePositionZNeutral > 0.0001f) {
+        *outZ =
+            clampf(((size / calibration->facePositionZNeutral) - 1.0f) * 10.0f,
+                   -10.0f, 10.0f);
+    }
+}
+
 static float blendshape_at(const AppleCVATrackedFace *face, size_t index) {
     if (face == NULL || index >= face->blendshape_count ||
         index >= APPLECVA_MAX_BLENDSHAPES) {
@@ -399,6 +560,8 @@ BOOL VTSAppleCVAObservedValuesFromFace(const AppleCVATrackedFace *face,
     outValues->faceAngleX = clampf(-yaw, -45.0f, 45.0f);
     outValues->faceAngleY = clampf(pitch, -45.0f, 45.0f);
     outValues->faceAngleZ = clampf(roll, -45.0f, 45.0f);
+    face_rect_values(face, &outValues->facePositionX, &outValues->facePositionY,
+                     &outValues->facePositionZ);
     outValues->jawOpen = blendshape_at(face, VTSAppleCVABlendshapeJawOpen);
     outValues->mouthOpen = mouth_open_value(face);
     outValues->eyeOpenLeft = eye_open_value(face, YES);
@@ -429,6 +592,9 @@ void VTSAppleCVACalibrationFromObservedSamples(
         sum.faceAngleXZero += samples[i].faceAngleX;
         sum.faceAngleYZero += samples[i].faceAngleY;
         sum.faceAngleZZero += samples[i].faceAngleZ;
+        sum.facePositionXZero += samples[i].facePositionX;
+        sum.facePositionYZero += samples[i].facePositionY;
+        sum.facePositionZNeutral += samples[i].facePositionZ;
         sum.jawOpenNeutral += samples[i].jawOpen;
         sum.eyeOpenLeftNeutral += samples[i].eyeOpenLeft;
         sum.eyeOpenRightNeutral += samples[i].eyeOpenRight;
@@ -445,6 +611,9 @@ void VTSAppleCVACalibrationFromObservedSamples(
     outCalibration->faceAngleXZero = sum.faceAngleXZero * scale;
     outCalibration->faceAngleYZero = sum.faceAngleYZero * scale;
     outCalibration->faceAngleZZero = sum.faceAngleZZero * scale;
+    outCalibration->facePositionXZero = sum.facePositionXZero * scale;
+    outCalibration->facePositionYZero = sum.facePositionYZero * scale;
+    outCalibration->facePositionZNeutral = sum.facePositionZNeutral * scale;
     outCalibration->jawOpenNeutral = sum.jawOpenNeutral * scale;
     outCalibration->eyeOpenLeftNeutral = sum.eyeOpenLeftNeutral * scale;
     outCalibration->eyeOpenRightNeutral = sum.eyeOpenRightNeutral * scale;
@@ -505,19 +674,12 @@ static void add_default_parameter(NSMutableArray *values,
     }
 }
 
-NSArray<NSDictionary *> *VTSAppleCVACustomParameterDefinitions(void) {
+NSArray<NSDictionary *> *
+VTSAppleCVACustomParameterDefinitions(BOOL includeARKitAliases,
+                                      BOOL includeACVABlendshapeParameters,
+                                      NSSet<NSString *> *availableDefaults) {
     NSMutableArray *definitions =
-        [NSMutableArray arrayWithCapacity:APPLECVA_MAX_BLENDSHAPES + 8];
-    for (size_t i = 0; i < APPLECVA_MAX_BLENDSHAPES; ++i) {
-        NSString *name =
-            [NSString stringWithUTF8String:kCustomBlendshapeNames[i]];
-        NSString *explanation =
-            [NSString stringWithFormat:@"AppleCVA ARKit channel %s",
-                                       AppleCVABlendshapeNames[i]];
-        [definitions addObject:parameter_definition(name, explanation, 0.0f,
-                                                    1.0f, 0.0f)];
-    }
-
+        [NSMutableArray arrayWithCapacity:kVTSMaxCustomParameters];
     [definitions addObject:parameter_definition(@"ACVATongueOut",
                                                 @"AppleCVA tongue out channel",
                                                 0.0f, 1.0f, 0.0f)];
@@ -532,6 +694,18 @@ NSArray<NSDictionary *> *VTSAppleCVACustomParameterDefinitions(void) {
         addObject:parameter_definition(@"ACVAFaceAngleZ",
                                        @"AppleCVA face roll in degrees", -45.0f,
                                        45.0f, 0.0f)];
+    [definitions
+        addObject:parameter_definition(@"ACVAFacePositionX",
+                                       @"AppleCVA calibrated face X position",
+                                       -10.0f, 10.0f, 0.0f)];
+    [definitions
+        addObject:parameter_definition(@"ACVAFacePositionY",
+                                       @"AppleCVA calibrated face Y position",
+                                       -10.0f, 10.0f, 0.0f)];
+    [definitions
+        addObject:parameter_definition(@"ACVAFacePositionZ",
+                                       @"AppleCVA calibrated face Z position",
+                                       -10.0f, 10.0f, 0.0f)];
     [definitions
         addObject:parameter_definition(@"ACVAEyeLeftX",
                                        @"AppleCVA left eye yaw in degrees",
@@ -568,20 +742,51 @@ NSArray<NSDictionary *> *VTSAppleCVACustomParameterDefinitions(void) {
     [definitions addObject:parameter_definition(@"ACVABrowRightY",
                                                 @"AppleCVA right brow height",
                                                 0.0f, 1.0f, 0.5f)];
+    if (includeARKitAliases) {
+        for (size_t i = 0; i < ARRAY_COUNT(kARKitAliasParameters); ++i) {
+            const VTSAppleCVAIndexedParameterName alias =
+                kARKitAliasParameters[i];
+            NSString *name = [NSString stringWithUTF8String:alias.name];
+            if (parameter_name_is_default(name, availableDefaults)) {
+                continue;
+            }
+            NSString *explanation = [NSString
+                stringWithFormat:@"AppleCVA ARKit alias for %s",
+                                 AppleCVABlendshapeNames[alias
+                                                             .blendshapeIndex]];
+            [definitions addObject:parameter_definition(name, explanation, 0.0f,
+                                                        1.0f, 0.0f)];
+        }
+    }
+    const size_t acvaBlendshapeCount = acva_blendshape_parameter_count(
+        includeARKitAliases, includeACVABlendshapeParameters,
+        availableDefaults);
+    if (includeACVABlendshapeParameters) {
+        log_dropped_acva_blendshape_parameters(acvaBlendshapeCount);
+    }
+    for (size_t i = 0; i < acvaBlendshapeCount; ++i) {
+        NSString *name =
+            [NSString stringWithUTF8String:kCustomBlendshapeNames[i]];
+        NSString *explanation =
+            [NSString stringWithFormat:@"AppleCVA ARKit channel %s",
+                                       AppleCVABlendshapeNames[i]];
+        [definitions addObject:parameter_definition(name, explanation, 0.0f,
+                                                    1.0f, 0.0f)];
+    }
     return definitions;
 }
 
-NSArray<NSDictionary *> *
-VTSAppleCVAParameterValues(const AppleCVATrackedFace *face, BOOL faceFound,
-                           NSSet<NSString *> *availableDefaultParameters,
-                           const VTSAppleCVACalibration *calibration,
-                           BOOL includeCustomParameters) {
+NSArray<NSDictionary *> *VTSAppleCVAParameterValues(
+    const AppleCVATrackedFace *face, BOOL faceFound,
+    NSSet<NSString *> *availableDefaultParameters,
+    const VTSAppleCVACalibration *calibration, BOOL includeCustomParameters,
+    BOOL includeARKitAliases, BOOL includeACVABlendshapeParameters) {
     if (!faceFound) {
         face = NULL;
     }
 
     NSMutableArray *values =
-        [NSMutableArray arrayWithCapacity:APPLECVA_MAX_BLENDSHAPES + 16];
+        [NSMutableArray arrayWithCapacity:APPLECVA_MAX_BLENDSHAPES + 64];
 
     VTSAppleCVAObservedValues observed;
     VTSAppleCVAObservedValuesFromFace(face, face != NULL, &observed);
@@ -596,6 +801,11 @@ VTSAppleCVAParameterValues(const AppleCVATrackedFace *face, BOOL faceFound,
     yaw = clampf(yaw, -45.0f, 45.0f);
     pitch = clampf(pitch * 1.35f, -45.0f, 45.0f);
     roll = clampf(roll, -45.0f, 45.0f);
+    float facePositionX = 0.0f;
+    float facePositionY = 0.0f;
+    float facePositionZ = 0.0f;
+    calibrated_face_position_values(face, calibration, &facePositionX,
+                                    &facePositionY, &facePositionZ);
     const float eyeOpenLeft = eye_open_value(face, YES);
     const float eyeOpenRight = eye_open_value(face, NO);
     const float mouthOpen = calibrated_mouth_open_value(face, calibration);
@@ -620,6 +830,12 @@ VTSAppleCVAParameterValues(const AppleCVATrackedFace *face, BOOL faceFound,
         add_default_parameter(values, availableDefaultParameters, @"FaceAngleZ",
                               roll);
         add_default_parameter(values, availableDefaultParameters,
+                              @"FacePositionX", facePositionX);
+        add_default_parameter(values, availableDefaultParameters,
+                              @"FacePositionY", facePositionY);
+        add_default_parameter(values, availableDefaultParameters,
+                              @"FacePositionZ", facePositionZ);
+        add_default_parameter(values, availableDefaultParameters,
                               @"EyeOpenLeft", eyeOpenLeft);
         add_default_parameter(values, availableDefaultParameters,
                               @"EyeOpenRight", eyeOpenRight);
@@ -637,26 +853,6 @@ VTSAppleCVAParameterValues(const AppleCVATrackedFace *face, BOOL faceFound,
                               mouthSmile);
         add_default_parameter(values, availableDefaultParameters, @"MouthX",
                               mouthX);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"VoiceVolume", mouthOpen);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"VoiceVolumePlusMouthOpen", mouthOpen);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"VoiceFrequency", 0.5f);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"VoiceFrequencyPlusMouthSmile", mouthSmile);
-        add_default_parameter(values, availableDefaultParameters, @"VoiceA",
-                              mouthOpen);
-        add_default_parameter(values, availableDefaultParameters, @"VoiceI",
-                              0.0f);
-        add_default_parameter(values, availableDefaultParameters, @"VoiceU",
-                              0.0f);
-        add_default_parameter(values, availableDefaultParameters, @"VoiceE",
-                              0.0f);
-        add_default_parameter(values, availableDefaultParameters, @"VoiceO",
-                              0.0f);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"VoiceSilence", 1.0f - mouthOpen);
         add_default_parameter(values, availableDefaultParameters, @"Brows",
                               (browLeftY + browRightY) * 0.5f);
         add_default_parameter(values, availableDefaultParameters, @"BrowLeftY",
@@ -665,16 +861,32 @@ VTSAppleCVAParameterValues(const AppleCVATrackedFace *face, BOOL faceFound,
                               browRightY);
         add_default_parameter(values, availableDefaultParameters, @"TongueOut",
                               face != NULL ? clamp01(face->tongue_out) : 0.0f);
-        add_default_parameter(
-            values, availableDefaultParameters, @"CheekPuff",
-            blendshape_at(face, VTSAppleCVABlendshapeCheekPuff));
+        if (!includeCustomParameters || !includeARKitAliases) {
+            add_default_parameter(
+                values, availableDefaultParameters, @"CheekPuff",
+                blendshape_at(face, VTSAppleCVABlendshapeCheekPuff));
+        }
     }
 
     if (!includeCustomParameters) {
         return values;
     }
 
-    for (size_t i = 0; i < APPLECVA_MAX_BLENDSHAPES; ++i) {
+    if (includeARKitAliases) {
+        for (size_t i = 0; i < ARRAY_COUNT(kARKitAliasParameters); ++i) {
+            const VTSAppleCVAIndexedParameterName alias =
+                kARKitAliasParameters[i];
+            NSString *name = [NSString stringWithUTF8String:alias.name];
+            [values addObject:parameter_value(
+                                  name,
+                                  blendshape_at(face, alias.blendshapeIndex))];
+        }
+    }
+
+    const size_t acvaBlendshapeCount = acva_blendshape_parameter_count(
+        includeARKitAliases, includeACVABlendshapeParameters,
+        availableDefaultParameters);
+    for (size_t i = 0; i < acvaBlendshapeCount; ++i) {
         NSString *name =
             [NSString stringWithUTF8String:kCustomBlendshapeNames[i]];
         [values addObject:parameter_value(name, blendshape_at(face, i))];
@@ -685,6 +897,9 @@ VTSAppleCVAParameterValues(const AppleCVATrackedFace *face, BOOL faceFound,
     [values addObject:parameter_value(@"ACVAFaceAngleX", yaw)];
     [values addObject:parameter_value(@"ACVAFaceAngleY", pitch)];
     [values addObject:parameter_value(@"ACVAFaceAngleZ", roll)];
+    [values addObject:parameter_value(@"ACVAFacePositionX", facePositionX)];
+    [values addObject:parameter_value(@"ACVAFacePositionY", facePositionY)];
+    [values addObject:parameter_value(@"ACVAFacePositionZ", facePositionZ)];
     [values addObject:parameter_value(@"ACVAEyeLeftX",
                                       face != NULL
                                           ? clampf(face->left_eye_yaw * 180.0f /

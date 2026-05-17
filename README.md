@@ -12,12 +12,12 @@ cmake --build build --config Release
 ## Run
 
 ```sh
-./build/vts_source [--host 127.0.0.1] [--port 8001] [--full] [--no-filter] [--no-custom]
+./build/vts_source [--host 127.0.0.1] [--port 8001] [--full] [--no-filter] [--no-custom] [--no-arkit-aliases] [--acva-blendshapes]
 ```
 
 Calibration is required before the app connects to VTube Studio or injects tracking parameters. Start the app, keep a neutral expression, look straight at the camera, and press `Calibrate First` button or `c` key.
 
-The app injects available default VTS tracking parameters and, by default, creates `ACVA...` custom parameters for AppleCVA's ARKit-style channels. Use `--no-custom` to inject only default VTS parameters.
+The app injects available default VTS tracking parameters and, by default, creates full ARKit-style aliases plus a small set of derived `ACVA...` custom parameters. Use `--no-custom` to inject only default VTS parameters, `--no-arkit-aliases` to disable alias custom parameters, or `--acva-blendshapes` to fill remaining custom slots with raw `ACVA...` blendshape channels.
 
 ## Preview Controls
 

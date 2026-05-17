@@ -6,10 +6,12 @@
 @interface VTSAppDelegate : NSObject <NSApplicationDelegate>
 
 - (instancetype)initWithHost:(NSString *)host
-                        port:(uint16_t)port
-              useFullBackend:(BOOL)useFullBackend
-                enableFilter:(BOOL)enableFilter
-     includeCustomParameters:(BOOL)includeCustomParameters;
+                               port:(uint16_t)port
+                     useFullBackend:(BOOL)useFullBackend
+                       enableFilter:(BOOL)enableFilter
+            includeCustomParameters:(BOOL)includeCustomParameters
+                includeARKitAliases:(BOOL)includeARKitAliases
+    includeACVABlendshapeParameters:(BOOL)includeACVABlendshapeParameters;
 
 @end
 

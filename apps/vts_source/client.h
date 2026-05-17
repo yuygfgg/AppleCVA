@@ -11,8 +11,10 @@
 @property(nonatomic, readonly) NSSet<NSString *> *defaultParameterNames;
 
 - (instancetype)initWithHost:(NSString *)host
-                        port:(uint16_t)port
-     includeCustomParameters:(BOOL)includeCustomParameters;
+                               port:(uint16_t)port
+            includeCustomParameters:(BOOL)includeCustomParameters
+                includeARKitAliases:(BOOL)includeARKitAliases
+    includeACVABlendshapeParameters:(BOOL)includeACVABlendshapeParameters;
 
 - (void)start;
 - (void)stop;

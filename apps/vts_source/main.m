@@ -13,7 +13,8 @@ static const uint16_t kDefaultVTSPort = 8001;
 static void print_usage(const char *argv0) {
     fprintf(stderr,
             "Usage: %s [--host 127.0.0.1] [--port 8001] [--full] "
-            "[--no-filter] [--no-custom]\n",
+            "[--no-filter] [--no-custom] [--no-arkit-aliases] "
+            "[--acva-blendshapes]\n",
             argv0);
 }
 
@@ -24,6 +25,8 @@ int main(int argc, const char *argv[]) {
         BOOL useFullBackend = NO;
         BOOL enableFilter = YES;
         BOOL includeCustomParameters = YES;
+        BOOL includeARKitAliases = YES;
+        BOOL includeACVABlendshapeParameters = NO;
 
         for (int i = 1; i < argc; ++i) {
             if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -40,6 +43,14 @@ int main(int argc, const char *argv[]) {
             }
             if (strcmp(argv[i], "--no-custom") == 0) {
                 includeCustomParameters = NO;
+                continue;
+            }
+            if (strcmp(argv[i], "--no-arkit-aliases") == 0) {
+                includeARKitAliases = NO;
+                continue;
+            }
+            if (strcmp(argv[i], "--acva-blendshapes") == 0) {
+                includeACVABlendshapeParameters = YES;
                 continue;
             }
             if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
@@ -61,12 +72,14 @@ int main(int argc, const char *argv[]) {
         }
 
         NSApplication *application = [NSApplication sharedApplication];
-        VTSAppDelegate *delegate =
-            [[VTSAppDelegate alloc] initWithHost:host
-                                            port:port
-                                  useFullBackend:useFullBackend
-                                    enableFilter:enableFilter
-                         includeCustomParameters:includeCustomParameters];
+        VTSAppDelegate *delegate = [[VTSAppDelegate alloc]
+                               initWithHost:host
+                                       port:port
+                             useFullBackend:useFullBackend
+                               enableFilter:enableFilter
+                    includeCustomParameters:includeCustomParameters
+                        includeARKitAliases:includeARKitAliases
+            includeACVABlendshapeParameters:includeACVABlendshapeParameters];
         application.delegate = delegate;
         [application run];
     }

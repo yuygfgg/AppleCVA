@@ -40,10 +40,13 @@ static BOOL parameterValueIDHasPrefix(NSDictionary *parameter,
     NSString *_host;
     uint16_t _port;
     BOOL _includeCustomParameters;
+    BOOL _includeARKitAliases;
+    BOOL _includeACVABlendshapeParameters;
     NSURLSession *_session;
     NSURLSessionWebSocketTask *_task;
     dispatch_queue_t _queue;
     NSMutableDictionary<NSString *, VTSResponseHandler> *_pending;
+    NSArray<NSDictionary *> *_customParameterDefinitions;
     NSUInteger _nextRequestID;
     NSString *_lastStatus;
     NSString *_authenticationToken;
@@ -53,13 +56,17 @@ static BOOL parameterValueIDHasPrefix(NSDictionary *parameter,
 }
 
 - (instancetype)initWithHost:(NSString *)host
-                        port:(uint16_t)port
-     includeCustomParameters:(BOOL)includeCustomParameters {
+                               port:(uint16_t)port
+            includeCustomParameters:(BOOL)includeCustomParameters
+                includeARKitAliases:(BOOL)includeARKitAliases
+    includeACVABlendshapeParameters:(BOOL)includeACVABlendshapeParameters {
     self = [super init];
     if (self != nil) {
         _host = [host copy] ?: @"127.0.0.1";
         _port = port;
         _includeCustomParameters = includeCustomParameters;
+        _includeARKitAliases = includeARKitAliases;
+        _includeACVABlendshapeParameters = includeACVABlendshapeParameters;
         _queue = dispatch_queue_create("local.applecva.vts-client",
                                        DISPATCH_QUEUE_SERIAL);
         _pending = [NSMutableDictionary dictionary];
@@ -92,15 +99,12 @@ static BOOL parameterValueIDHasPrefix(NSDictionary *parameter,
       }
       NSMutableArray<NSDictionary *> *coreValues = [NSMutableArray array];
       NSMutableArray<NSDictionary *> *mouthValues = [NSMutableArray array];
-      NSMutableArray<NSDictionary *> *voiceValues = [NSMutableArray array];
       NSMutableArray<NSDictionary *> *customValues = [NSMutableArray array];
       for (NSDictionary *parameter in parameterValues) {
           if (parameterValueHasACVAPrefix(parameter)) {
               [customValues addObject:parameter];
           } else if (parameterValueIDHasPrefix(parameter, @"Mouth")) {
               [mouthValues addObject:parameter];
-          } else if (parameterValueIDHasPrefix(parameter, @"Voice")) {
-              [voiceValues addObject:parameter];
           } else {
               [coreValues addObject:parameter];
           }
@@ -112,9 +116,6 @@ static BOOL parameterValueIDHasPrefix(NSDictionary *parameter,
       }
       if (mouthValues.count != 0) {
           [groups addObject:mouthValues];
-      }
-      if (voiceValues.count != 0) {
-          [groups addObject:voiceValues];
       }
       if (customValues.count != 0) {
           [groups addObject:customValues];
@@ -221,6 +222,7 @@ static BOOL parameterValueIDHasPrefix(NSDictionary *parameter,
     self.authenticated = NO;
     self.connected = NO;
     [_pending removeAllObjects];
+    _customParameterDefinitions = nil;
     [_task cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure
                         reason:nil];
     _task = nil;
@@ -331,6 +333,11 @@ static BOOL parameterValueIDHasPrefix(NSDictionary *parameter,
                                                           .count]];
                          return;
                      }
+                     self->_customParameterDefinitions =
+                         VTSAppleCVACustomParameterDefinitions(
+                             self->_includeARKitAliases,
+                             self->_includeACVABlendshapeParameters,
+                             self.defaultParameterNames);
                      [self createCustomParametersLockedAtIndex:0];
                    }];
                  }];
@@ -378,8 +385,7 @@ static BOOL parameterValueIDHasPrefix(NSDictionary *parameter,
 }
 
 - (void)createCustomParametersLockedAtIndex:(NSUInteger)index {
-    NSArray<NSDictionary *> *definitions =
-        VTSAppleCVACustomParameterDefinitions();
+    NSArray<NSDictionary *> *definitions = _customParameterDefinitions;
     if (index >= definitions.count) {
         self.ready = YES;
         [self
