@@ -221,12 +221,12 @@ ApplicationWindow {
             width: sl.availableWidth
             height: implicitHeight
             radius: 3
-            color: "#e0e0e0"
+            color: sl.enabled ? "#e0e0e0" : "#eeeeee"
 
             Rectangle {
                 width: sl.visualPosition * parent.width
                 height: parent.height
-                color: "#4A90E2"
+                color: sl.enabled ? "#4A90E2" : "#BBD4F5"
                 radius: 3
             }
         }
@@ -236,8 +236,8 @@ ApplicationWindow {
             implicitWidth: 20
             implicitHeight: 20
             radius: 10
-            color: sl.pressed ? "#f0f0f0" : "#ffffff"
-            border.color: "#4A90E2"
+            color: sl.enabled ? (sl.pressed ? "#f0f0f0" : "#ffffff") : "#f8fbff"
+            border.color: sl.enabled ? "#4A90E2" : "#BBD4F5"
             border.width: 2
         }
     }
@@ -396,19 +396,23 @@ ApplicationWindow {
                             onActivated: index => controller.useFullBackend = (index === 1)
                         }
 
+                    }
+
+                    Card {
+                        id: oneEuroFilterCard
+                        title: "One Euro Filter"
+                        readonly property color parameterLabelColor: controller.enableFilter ? "#5c5c5c" : "#a8a8a8"
+
                         VTSToggle {
                             text: "Use One Euro filter"
                             checked: controller.enableFilter
                             onToggled: controller.enableFilter = checked
                             Layout.topMargin: 8
                         }
-                    }
-
-                    Card {
-                        title: "One Euro Filter"
                         
-                        Label { text: "Min cutoff: " + controller.oneEuroMinCutoff.toFixed(2); color: "#5c5c5c" }
+                        Label { text: "Min cutoff: " + controller.oneEuroMinCutoff.toFixed(2); color: oneEuroFilterCard.parameterLabelColor }
                         VTSSlider {
+                            enabled: controller.enableFilter
                             from: 0.01
                             to: 10.0
                             value: controller.oneEuroMinCutoff
@@ -416,8 +420,9 @@ ApplicationWindow {
                             onMoved: controller.oneEuroMinCutoff = value
                         }
 
-                        Label { text: "Beta: " + controller.oneEuroBeta.toFixed(4); color: "#5c5c5c"; Layout.topMargin: 4 }
+                        Label { text: "Beta: " + controller.oneEuroBeta.toFixed(4); color: oneEuroFilterCard.parameterLabelColor; Layout.topMargin: 4 }
                         VTSSlider {
+                            enabled: controller.enableFilter
                             from: 0.0
                             to: 0.05
                             value: controller.oneEuroBeta
@@ -425,8 +430,9 @@ ApplicationWindow {
                             onMoved: controller.oneEuroBeta = value
                         }
 
-                        Label { text: "Derivative: " + controller.oneEuroDerivativeCutoff.toFixed(2); color: "#5c5c5c"; Layout.topMargin: 4 }
+                        Label { text: "Derivative: " + controller.oneEuroDerivativeCutoff.toFixed(2); color: oneEuroFilterCard.parameterLabelColor; Layout.topMargin: 4 }
                         VTSSlider {
+                            enabled: controller.enableFilter
                             from: 0.01
                             to: 10.0
                             value: controller.oneEuroDerivativeCutoff
