@@ -1,20 +1,12 @@
+import AppleCVANative 1.0
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import AppleCVANative 1.0
 
 ApplicationWindow {
     id: root
+
     readonly property int sidePadding: 20
-
-    width: 1320
-    height: 760
-    minimumWidth: 1080
-    minimumHeight: 620
-    visible: true
-    title: "AppleCVA VTS Source"
-    color: "#ffe9f0"
-
     readonly property bool previewShortcutsEnabled: !hostField.activeFocus && !portField.activeFocus
 
     function toggleMirrorPreview() {
@@ -37,11 +29,13 @@ ApplicationWindow {
         controller.enableFilter = !controller.enableFilter;
     }
 
-    component PreviewShortcut: Shortcut {
-        context: Qt.WindowShortcut
-        enabled: root.previewShortcutsEnabled
-        autoRepeat: false
-    }
+    width: 1320
+    height: 760
+    minimumWidth: 1080
+    minimumHeight: 620
+    visible: true
+    title: "AppleCVA VTS Source"
+    color: "#ffe9f0"
 
     PreviewShortcut {
         sequence: "X"
@@ -93,155 +87,6 @@ ApplicationWindow {
         }
     }
 
-    component Card: Rectangle {
-        default property alias content: layout.data
-        property string title: ""
-
-        color: "#ffffff"
-        radius: 14
-        border.color: "#f0f0f0"
-        border.width: 1
-        Layout.fillWidth: true
-        implicitHeight: layout.implicitHeight + 32
-        
-        Rectangle {
-            z: -1
-            anchors.fill: parent
-            anchors.margins: -1
-            anchors.rightMargin: -3
-            anchors.bottomMargin: -3
-            radius: 14
-            color: "#15000000"
-        }
-
-        ColumnLayout {
-            id: layout
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 12
-
-            Label {
-                text: parent.parent.title
-                font.pixelSize: 18
-                font.bold: true
-                color: "#5c5c5c"
-                visible: parent.parent.title !== ""
-                Layout.fillWidth: true
-                Layout.bottomMargin: 4
-            }
-        }
-    }
-
-    component VTSButton: Button {
-        id: btn
-        contentItem: Text {
-            text: btn.text
-            font.pixelSize: 15
-            font.bold: true
-            color: "white"
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-        background: Rectangle {
-            implicitHeight: 40
-            color: btn.down ? "#3A78C4" : btn.enabled ? "#4A90E2" : "#BBD4F5"
-            radius: 20
-        }
-    }
-
-    component VTSToggle: Switch {
-        id: sw
-        indicator: Rectangle {
-            implicitWidth: 44
-            implicitHeight: 24
-            x: sw.leftPadding
-            y: parent.height / 2 - height / 2
-            radius: 12
-            color: sw.checked ? "#4A90E2" : "#d5d5d5"
-
-            Rectangle {
-                x: sw.checked ? parent.width - width - 2 : 2
-                y: 2
-                width: 20
-                height: 20
-                radius: 10
-                color: "white"
-                Behavior on x { NumberAnimation { duration: 150 } }
-            }
-        }
-
-        contentItem: Text {
-            text: sw.text
-            font.pixelSize: 14
-            color: "#5c5c5c"
-            verticalAlignment: Text.AlignVCenter
-            leftPadding: sw.indicator.width + sw.spacing
-        }
-    }
-
-    component VTSTextField: TextField {
-        id: tf
-        background: Rectangle {
-            implicitHeight: 36
-            radius: 8
-            color: "#f5f6fa"
-            border.color: tf.activeFocus ? "#4A90E2" : "#e0e0e0"
-            border.width: 1
-        }
-        color: "#5c5c5c"
-    }
-
-    component VTSComboBox: ComboBox {
-        id: cb
-        background: Rectangle {
-            implicitHeight: 36
-            radius: 8
-            color: "#f5f6fa"
-            border.color: cb.activeFocus ? "#4A90E2" : "#e0e0e0"
-            border.width: 1
-        }
-        contentItem: Text {
-            leftPadding: 12
-            rightPadding: cb.indicator.width + cb.spacing
-            text: cb.displayText
-            font.pixelSize: 14
-            color: "#5c5c5c"
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-    }
-
-    component VTSSlider: Slider {
-        id: sl
-        background: Rectangle {
-            x: sl.leftPadding
-            y: sl.topPadding + sl.availableHeight / 2 - height / 2
-            implicitWidth: 200
-            implicitHeight: 6
-            width: sl.availableWidth
-            height: implicitHeight
-            radius: 3
-            color: sl.enabled ? "#e0e0e0" : "#eeeeee"
-
-            Rectangle {
-                width: sl.visualPosition * parent.width
-                height: parent.height
-                color: sl.enabled ? "#4A90E2" : "#BBD4F5"
-                radius: 3
-            }
-        }
-        handle: Rectangle {
-            x: sl.leftPadding + sl.visualPosition * (sl.availableWidth - width)
-            y: sl.topPadding + sl.availableHeight / 2 - height / 2
-            implicitWidth: 20
-            implicitHeight: 20
-            radius: 10
-            color: sl.enabled ? (sl.pressed ? "#f0f0f0" : "#ffffff") : "#f8fbff"
-            border.color: sl.enabled ? "#4A90E2" : "#BBD4F5"
-            border.width: 2
-        }
-    }
-
     RowLayout {
         anchors.fill: parent
         anchors.margins: 20
@@ -268,15 +113,16 @@ ApplicationWindow {
 
             VTSPreview {
                 id: preview
+
                 anchors.fill: parent
                 anchors.margins: 4
                 mirrorPreview: controller.mirrorPreview
                 showCameraPreview: controller.showCameraPreview
                 flipLandmarkY: controller.flipLandmarkY
                 topLeftOrigin: controller.topLeftOrigin
-
                 Component.onCompleted: controller.setPreviewItem(preview)
             }
+
         }
 
         Rectangle {
@@ -286,20 +132,23 @@ ApplicationWindow {
 
             ScrollView {
                 id: sideScroll
+
                 anchors.fill: parent
                 clip: true
                 contentWidth: availableWidth
-
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
                 ColumnLayout {
                     id: settingsColumn
+
                     width: sideScroll.availableWidth - 16
                     x: 8
                     spacing: 16
-                    
-                    Item { Layout.preferredHeight: 4 }
+
+                    Item {
+                        Layout.preferredHeight: 4
+                    }
 
                     Card {
                         title: "AppleCVA VTS Source"
@@ -326,6 +175,7 @@ ApplicationWindow {
                             font.pixelSize: 12
                             Layout.fillWidth: true
                         }
+
                     }
 
                     Card {
@@ -337,22 +187,35 @@ ApplicationWindow {
                             rowSpacing: 10
                             columnSpacing: 10
 
-                            Label { text: "Host"; color: "#5c5c5c"; font.bold: true }
+                            Label {
+                                text: "Host"
+                                color: "#5c5c5c"
+                                font.bold: true
+                            }
+
                             VTSTextField {
                                 id: hostField
+
                                 text: controller.host
                                 Layout.fillWidth: true
                                 onEditingFinished: controller.applyConnection(hostField.text, portField.text)
                             }
 
-                            Label { text: "Port"; color: "#5c5c5c"; font.bold: true }
+                            Label {
+                                text: "Port"
+                                color: "#5c5c5c"
+                                font.bold: true
+                            }
+
                             VTSTextField {
                                 id: portField
+
                                 text: String(controller.port)
                                 inputMethodHints: Qt.ImhDigitsOnly
                                 Layout.fillWidth: true
                                 onEditingFinished: controller.applyConnection(hostField.text, portField.text)
                             }
+
                         }
 
                         VTSToggle {
@@ -375,33 +238,51 @@ ApplicationWindow {
                             checked: controller.includeACVABlendshapeParameters
                             onToggled: controller.includeACVABlendshapeParameters = checked
                         }
+
                     }
 
                     Card {
                         title: "Tracking Settings"
 
-                        Label { text: "Camera"; color: "#5c5c5c"; font.bold: true }
+                        Label {
+                            text: "Camera"
+                            color: "#5c5c5c"
+                            font.bold: true
+                        }
+
                         VTSComboBox {
                             model: controller.cameraNames
                             currentIndex: controller.cameraIndex
                             Layout.fillWidth: true
-                            onActivated: index => controller.setCameraIndex(index)
+                            onActivated: (index) => {
+                                return controller.setCameraIndex(index);
+                            }
                         }
 
-                        Label { text: "Backend"; color: "#5c5c5c"; font.bold: true; Layout.topMargin: 8 }
+                        Label {
+                            text: "Backend"
+                            color: "#5c5c5c"
+                            font.bold: true
+                            Layout.topMargin: 8
+                        }
+
                         VTSComboBox {
                             model: ["Lite backend", "Full backend"]
                             currentIndex: controller.useFullBackend ? 1 : 0
                             Layout.fillWidth: true
-                            onActivated: index => controller.useFullBackend = (index === 1)
+                            onActivated: (index) => {
+                                return controller.useFullBackend = (index === 1);
+                            }
                         }
 
                     }
 
                     Card {
                         id: oneEuroFilterCard
-                        title: "One Euro Filter"
+
                         readonly property color parameterLabelColor: controller.enableFilter ? "#5c5c5c" : "#a8a8a8"
+
+                        title: "One Euro Filter"
 
                         VTSToggle {
                             text: "Use One Euro filter"
@@ -409,36 +290,51 @@ ApplicationWindow {
                             onToggled: controller.enableFilter = checked
                             Layout.topMargin: 8
                         }
-                        
-                        Label { text: "Min cutoff: " + controller.oneEuroMinCutoff.toFixed(2); color: oneEuroFilterCard.parameterLabelColor }
+
+                        Label {
+                            text: "Min cutoff: " + controller.oneEuroMinCutoff.toFixed(2)
+                            color: oneEuroFilterCard.parameterLabelColor
+                        }
+
                         VTSSlider {
                             enabled: controller.enableFilter
                             from: 0.01
-                            to: 10.0
+                            to: 10
                             value: controller.oneEuroMinCutoff
                             Layout.fillWidth: true
                             onMoved: controller.oneEuroMinCutoff = value
                         }
 
-                        Label { text: "Beta: " + controller.oneEuroBeta.toFixed(4); color: oneEuroFilterCard.parameterLabelColor; Layout.topMargin: 4 }
+                        Label {
+                            text: "Beta: " + controller.oneEuroBeta.toFixed(4)
+                            color: oneEuroFilterCard.parameterLabelColor
+                            Layout.topMargin: 4
+                        }
+
                         VTSSlider {
                             enabled: controller.enableFilter
-                            from: 0.0
+                            from: 0
                             to: 0.05
                             value: controller.oneEuroBeta
                             Layout.fillWidth: true
                             onMoved: controller.oneEuroBeta = value
                         }
 
-                        Label { text: "Derivative: " + controller.oneEuroDerivativeCutoff.toFixed(2); color: oneEuroFilterCard.parameterLabelColor; Layout.topMargin: 4 }
+                        Label {
+                            text: "Derivative: " + controller.oneEuroDerivativeCutoff.toFixed(2)
+                            color: oneEuroFilterCard.parameterLabelColor
+                            Layout.topMargin: 4
+                        }
+
                         VTSSlider {
                             enabled: controller.enableFilter
                             from: 0.01
-                            to: 10.0
+                            to: 10
                             value: controller.oneEuroDerivativeCutoff
                             Layout.fillWidth: true
                             onMoved: controller.oneEuroDerivativeCutoff = value
                         }
+
                     }
 
                     Card {
@@ -467,6 +363,7 @@ ApplicationWindow {
                             checked: controller.topLeftOrigin
                             onToggled: controller.topLeftOrigin = checked
                         }
+
                     }
 
                     Card {
@@ -478,26 +375,261 @@ ApplicationWindow {
                             rowSpacing: 8
                             Layout.fillWidth: true
 
-                            Label { text: "FPS"; color: "#999999" }
-                            Label { text: controller.fps.toFixed(1); color: "#5c5c5c"; font.bold: true; Layout.fillWidth: true }
+                            Label {
+                                text: "FPS"
+                                color: "#999999"
+                            }
 
-                            Label { text: "Detected"; color: "#999999" }
-                            Label { text: String(controller.detectedFaceCount); color: "#5c5c5c"; font.bold: true; Layout.fillWidth: true }
+                            Label {
+                                text: controller.fps.toFixed(1)
+                                color: "#5c5c5c"
+                                font.bold: true
+                                Layout.fillWidth: true
+                            }
 
-                            Label { text: "Tracked"; color: "#999999" }
-                            Label { text: String(controller.trackedFaceCount); color: "#5c5c5c"; font.bold: true; Layout.fillWidth: true }
+                            Label {
+                                text: "Detected"
+                                color: "#999999"
+                            }
 
-                            Label { text: "Confidence"; color: "#999999" }
-                            Label { text: controller.hasFace ? controller.confidence.toFixed(3) : "-"; color: "#5c5c5c"; font.bold: true; Layout.fillWidth: true }
+                            Label {
+                                text: String(controller.detectedFaceCount)
+                                color: "#5c5c5c"
+                                font.bold: true
+                                Layout.fillWidth: true
+                            }
 
-                            Label { text: "Calibration"; color: "#999999" }
-                            Label { text: String(controller.calibrationSampleCount) + "/" + String(controller.calibrationSampleTarget); color: "#5c5c5c"; font.bold: true; Layout.fillWidth: true }
+                            Label {
+                                text: "Tracked"
+                                color: "#999999"
+                            }
+
+                            Label {
+                                text: String(controller.trackedFaceCount)
+                                color: "#5c5c5c"
+                                font.bold: true
+                                Layout.fillWidth: true
+                            }
+
+                            Label {
+                                text: "Confidence"
+                                color: "#999999"
+                            }
+
+                            Label {
+                                text: controller.hasFace ? controller.confidence.toFixed(3) : "-"
+                                color: "#5c5c5c"
+                                font.bold: true
+                                Layout.fillWidth: true
+                            }
+
+                            Label {
+                                text: "Calibration"
+                                color: "#999999"
+                            }
+
+                            Label {
+                                text: String(controller.calibrationSampleCount) + "/" + String(controller.calibrationSampleTarget)
+                                color: "#5c5c5c"
+                                font.bold: true
+                                Layout.fillWidth: true
+                            }
+
                         }
+
                     }
 
-                    Item { Layout.preferredHeight: 20 }
+                    Item {
+                        Layout.preferredHeight: 20
+                    }
+
                 }
+
             }
+
         }
+
     }
+
+    component PreviewShortcut: Shortcut {
+        context: Qt.WindowShortcut
+        enabled: root.previewShortcutsEnabled
+        autoRepeat: false
+    }
+
+    component Card: Rectangle {
+        default property alias content: layout.data
+        property string title: ""
+
+        color: "#ffffff"
+        radius: 14
+        border.color: "#f0f0f0"
+        border.width: 1
+        Layout.fillWidth: true
+        implicitHeight: layout.implicitHeight + 32
+
+        Rectangle {
+            z: -1
+            anchors.fill: parent
+            anchors.margins: -1
+            anchors.rightMargin: -3
+            anchors.bottomMargin: -3
+            radius: 14
+            color: "#15000000"
+        }
+
+        ColumnLayout {
+            id: layout
+
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 12
+
+            Label {
+                text: parent.parent.title
+                font.pixelSize: 18
+                font.bold: true
+                color: "#5c5c5c"
+                visible: parent.parent.title !== ""
+                Layout.fillWidth: true
+                Layout.bottomMargin: 4
+            }
+
+        }
+
+    }
+
+    component VTSButton: Button {
+        id: btn
+
+        contentItem: Text {
+            text: btn.text
+            font.pixelSize: 15
+            font.bold: true
+            color: "white"
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        background: Rectangle {
+            implicitHeight: 40
+            color: btn.down ? "#3A78C4" : btn.enabled ? "#4A90E2" : "#BBD4F5"
+            radius: 20
+        }
+
+    }
+
+    component VTSToggle: Switch {
+        id: sw
+
+        indicator: Rectangle {
+            implicitWidth: 44
+            implicitHeight: 24
+            x: sw.leftPadding
+            y: parent.height / 2 - height / 2
+            radius: 12
+            color: sw.checked ? "#4A90E2" : "#d5d5d5"
+
+            Rectangle {
+                x: sw.checked ? parent.width - width - 2 : 2
+                y: 2
+                width: 20
+                height: 20
+                radius: 10
+                color: "white"
+
+                Behavior on x {
+                    NumberAnimation {
+                        duration: 150
+                    }
+
+                }
+
+            }
+
+        }
+
+        contentItem: Text {
+            text: sw.text
+            font.pixelSize: 14
+            color: "#5c5c5c"
+            verticalAlignment: Text.AlignVCenter
+            leftPadding: sw.indicator.width + sw.spacing
+        }
+
+    }
+
+    component VTSTextField: TextField {
+        id: tf
+
+        color: "#5c5c5c"
+
+        background: Rectangle {
+            implicitHeight: 36
+            radius: 8
+            color: "#f5f6fa"
+            border.color: tf.activeFocus ? "#4A90E2" : "#e0e0e0"
+            border.width: 1
+        }
+
+    }
+
+    component VTSComboBox: ComboBox {
+        id: cb
+
+        background: Rectangle {
+            implicitHeight: 36
+            radius: 8
+            color: "#f5f6fa"
+            border.color: cb.activeFocus ? "#4A90E2" : "#e0e0e0"
+            border.width: 1
+        }
+
+        contentItem: Text {
+            leftPadding: 12
+            rightPadding: cb.indicator.width + cb.spacing
+            text: cb.displayText
+            font.pixelSize: 14
+            color: "#5c5c5c"
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+    }
+
+    component VTSSlider: Slider {
+        id: sl
+
+        background: Rectangle {
+            x: sl.leftPadding
+            y: sl.topPadding + sl.availableHeight / 2 - height / 2
+            implicitWidth: 200
+            implicitHeight: 6
+            width: sl.availableWidth
+            height: implicitHeight
+            radius: 3
+            color: sl.enabled ? "#e0e0e0" : "#eeeeee"
+
+            Rectangle {
+                width: sl.visualPosition * parent.width
+                height: parent.height
+                color: sl.enabled ? "#4A90E2" : "#BBD4F5"
+                radius: 3
+            }
+
+        }
+
+        handle: Rectangle {
+            x: sl.leftPadding + sl.visualPosition * (sl.availableWidth - width)
+            y: sl.topPadding + sl.availableHeight / 2 - height / 2
+            implicitWidth: 20
+            implicitHeight: 20
+            radius: 10
+            color: sl.enabled ? (sl.pressed ? "#f0f0f0" : "#ffffff") : "#f8fbff"
+            border.color: sl.enabled ? "#4A90E2" : "#BBD4F5"
+            border.width: 2
+        }
+
+    }
+
 }
