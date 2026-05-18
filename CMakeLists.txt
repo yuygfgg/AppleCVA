@@ -150,6 +150,8 @@ install(TARGETS vts_source
     BUNDLE DESTINATION ".")
 install(TARGETS applecva
     LIBRARY DESTINATION "${APPLECVA_APP_NAME}.app/Contents/Frameworks")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    DESTINATION ".")
 
 set(APPLECVA_QT_DEPLOY_SCRIPT
     "${CMAKE_CURRENT_BINARY_DIR}/cmake/AppleCVADeployQt.cmake")

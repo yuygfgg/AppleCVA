@@ -63,3 +63,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
 cmake --build build --config Release --target package
 ```
+
+## License
+
+This project is licensed under the [GPL-3.0](./LICENSE) license, or any later version.

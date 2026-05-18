@@ -71,6 +71,10 @@ jobs:
           tmpdir="$(mktemp -d)"
           unzip -q "$package_path" -d "$tmpdir"
           app_path="$tmpdir/AppleCVA VTS Source.app"
+          license_path="$tmpdir/LICENSE"
+
+          test -d "$app_path"
+          test -f "$license_path"
 
           codesign --verify --deep --strict --verbose=2 "$app_path"
           du -sh "$app_path"
