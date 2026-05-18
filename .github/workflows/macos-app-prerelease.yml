@@ -57,7 +57,6 @@ jobs:
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
-            -DAPPLECVA_MACDEPLOYQT_EXECUTABLE="$QT_PREFIX/bin/macdeployqt" \
             -DAPPLECVA_CODESIGN_IDENTITY="-" \
             -DCPACK_PACKAGE_FILE_NAME="AppleCVA-VTS-Source-${{ matrix.commit }}-macos"
 
@@ -74,6 +73,7 @@ jobs:
           app_path="$tmpdir/AppleCVA VTS Source.app"
 
           codesign --verify --deep --strict --verbose=2 "$app_path"
+          du -sh "$app_path"
 
           bad_refs_file="$tmpdir/bad-refs.txt"
           find "$app_path/Contents" -type f -print0 \
