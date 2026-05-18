@@ -425,7 +425,7 @@ calibrated_face_position_values(const AppleCVATrackedFace *face,
     }
     if (outZ != NULL && calibration->facePositionZNeutral > 0.0001f) {
         *outZ =
-            clampf(((size / calibration->facePositionZNeutral) - 1.0f) * 10.0f,
+            clampf((1.0f - (size / calibration->facePositionZNeutral)) * 10.0f,
                    -10.0f, 10.0f);
     }
 }
