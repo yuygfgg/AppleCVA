@@ -42,6 +42,7 @@ set(APPLECVA_FRAMEWORKS
 
 set(VTS_SOURCE_FRAMEWORKS
     AVFoundation
+    Metal
     QuartzCore)
 
 function(target_link_apple_frameworks target visibility)
@@ -80,7 +81,7 @@ qt_add_executable(vts_source
     apps/vts_source/qt/controller.h
     apps/vts_source/qt/controller.mm
     apps/vts_source/qt/preview_item.h
-    apps/vts_source/qt/preview_item.cpp
+    apps/vts_source/qt/preview_item.mm
     apps/vts_source/calibration.m
     apps/vts_source/client.m
     apps/vts_source/parameters.m)

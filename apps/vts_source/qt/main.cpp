@@ -6,11 +6,14 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
 
 int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("AppleCVA VTS Source"));
     QCoreApplication::setOrganizationName(QStringLiteral("AppleCVA"));
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Metal);
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     qmlRegisterType<VTSPreviewItem>("AppleCVANative", 1, 0, "VTSPreview");

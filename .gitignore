@@ -1,6 +1,11 @@
 .DS_Store
 build/
 
-# Xcode local user state
 xcuserdata/
 *.xcuserstate
+
+*.gpr
+*.lock*
+*.rep/
+
+docs/

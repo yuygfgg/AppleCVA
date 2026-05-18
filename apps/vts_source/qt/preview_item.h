@@ -3,10 +3,12 @@
 
 #include "applecva.h"
 
-#include <QImage>
-#include <QQuickPaintedItem>
+#include <CoreVideo/CoreVideo.h>
 
-class VTSPreviewItem : public QQuickPaintedItem {
+#include <QQuickItem>
+#include <QSizeF>
+
+class VTSPreviewItem : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(bool mirrorPreview READ mirrorPreview WRITE setMirrorPreview
                    NOTIFY mirrorPreviewChanged)
@@ -19,6 +21,7 @@ class VTSPreviewItem : public QQuickPaintedItem {
 
   public:
     explicit VTSPreviewItem(QQuickItem* parent = nullptr);
+    ~VTSPreviewItem() override;
 
     bool mirrorPreview() const;
     void setMirrorPreview(bool enabled);
@@ -32,11 +35,13 @@ class VTSPreviewItem : public QQuickPaintedItem {
     bool topLeftOrigin() const;
     void setTopLeftOrigin(bool enabled);
 
-    void setFrame(const QImage& image, const AppleCVATrackedFace* face,
+    void setFrame(CVPixelBufferRef pixelBuffer, const AppleCVATrackedFace* face,
                   bool hasFace, size_t detectedFaceCount,
                   size_t trackedFaceCount, int32_t lastStatus, double fps);
 
-    void paint(QPainter* painter) override;
+  protected:
+    QSGNode* updatePaintNode(QSGNode* oldNode,
+                             UpdatePaintNodeData* updatePaintNodeData) override;
 
   signals:
     void mirrorPreviewChanged();
@@ -58,11 +63,11 @@ class VTSPreviewItem : public QQuickPaintedItem {
                           size_t imageWidth, size_t imageHeight,
                           const QRectF& landmarkBounds,
                           bool hasLandmarkBounds) const;
-    void drawFaceOverlay(QPainter* painter, const QRectF& imageRect,
-                         size_t imageWidth, size_t imageHeight);
-    void drawStatusOverlay(QPainter* painter);
+    void clearPixelBuffer();
 
-    QImage image_;
+    CVPixelBufferRef pixelBuffer_ = nullptr;
+    QSizeF sourceSize_;
+    OSType pixelFormat_ = 0;
     AppleCVATrackedFace face_{};
     bool hasFace_ = false;
     size_t detectedFaceCount_ = 0;
@@ -73,6 +78,8 @@ class VTSPreviewItem : public QQuickPaintedItem {
     bool showCameraPreview_ = true;
     bool flipLandmarkY_ = false;
     bool topLeftOrigin_ = true;
+
+    friend class VTSPreviewRootNode;
 };
 
 #endif // VTS_SOURCE_QT_PREVIEW_ITEM_H
