@@ -173,6 +173,8 @@ backend_mode_prefers_full_capture_preset(AppleCVABackendMode backendMode) {
     output.videoSettings = @{
         (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey :
             @(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange),
+        (__bridge NSString *)kCVPixelBufferMetalCompatibilityKey : @YES,
+        (__bridge NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{},
     };
 
     _captureQueue = dispatch_queue_create(_captureQueueLabel.UTF8String,

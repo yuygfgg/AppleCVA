@@ -11,7 +11,6 @@
 #include <CoreVideo/CoreVideo.h>
 #include <Foundation/Foundation.h>
 
-#include <QImage>
 #include <QMetaObject>
 #include <QPointer>
 
@@ -20,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <utility>
 
 static const uint16_t kDefaultVTSPort = 8001;
 static const int kDefaultBackendMode = APPLECVA_BACKEND_MODE_AUTO;
@@ -29,6 +29,51 @@ static const double kOneEuroBetaMinimum = 0.0;
 static const double kOneEuroBetaMaximum = 0.05;
 static const double kOneEuroDerivativeCutoffMinimum = 0.01;
 static const double kOneEuroDerivativeCutoffMaximum = 10.0;
+
+class RetainedPixelBuffer {
+  public:
+    RetainedPixelBuffer() = default;
+    explicit RetainedPixelBuffer(CVPixelBufferRef buffer) : buffer_(buffer) {
+        if (buffer_ != nullptr) {
+            CVPixelBufferRetain(buffer_);
+        }
+    }
+    RetainedPixelBuffer(const RetainedPixelBuffer &other)
+        : RetainedPixelBuffer(other.buffer_) {}
+    RetainedPixelBuffer(RetainedPixelBuffer &&other) noexcept
+        : buffer_(std::exchange(other.buffer_, nullptr)) {}
+    RetainedPixelBuffer &operator=(const RetainedPixelBuffer &other) {
+        if (this == &other) {
+            return *this;
+        }
+        RetainedPixelBuffer copy(other);
+        swap(copy);
+        return *this;
+    }
+    RetainedPixelBuffer &operator=(RetainedPixelBuffer &&other) noexcept {
+        if (this != &other) {
+            clear();
+            buffer_ = std::exchange(other.buffer_, nullptr);
+        }
+        return *this;
+    }
+    ~RetainedPixelBuffer() { clear(); }
+
+    CVPixelBufferRef get() const { return buffer_; }
+
+  private:
+    void clear() {
+        if (buffer_ != nullptr) {
+            CVPixelBufferRelease(buffer_);
+            buffer_ = nullptr;
+        }
+    }
+    void swap(RetainedPixelBuffer &other) noexcept {
+        std::swap(buffer_, other.buffer_);
+    }
+
+    CVPixelBufferRef buffer_ = nullptr;
+};
 
 static NSString *const kDefaultsHostKey = @"vts_source.host";
 static NSString *const kDefaultsPortKey = @"vts_source.port";
@@ -228,78 +273,6 @@ static AVCaptureDevice *selectedCameraDevice(VTSController::Impl *impl) {
     return [AVCaptureDevice
         deviceWithUniqueID:nsStringFromQString(
                                settings.selectedCameraUniqueID)];
-}
-
-static int clamp8(int value) { return std::min(std::max(value, 0), 255); }
-
-static QImage imageFromPixelBuffer(CVPixelBufferRef pixelBuffer) {
-    if (pixelBuffer == nullptr) {
-        return QImage();
-    }
-
-    CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-    const OSType format = CVPixelBufferGetPixelFormatType(pixelBuffer);
-    QImage image;
-
-    if (format == kCVPixelFormatType_32BGRA) {
-        const int width = static_cast<int>(CVPixelBufferGetWidth(pixelBuffer));
-        const int height =
-            static_cast<int>(CVPixelBufferGetHeight(pixelBuffer));
-        const size_t bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer);
-        const auto *base = static_cast<const uchar *>(
-            CVPixelBufferGetBaseAddress(pixelBuffer));
-        if (base != nullptr && width > 0 && height > 0) {
-            image = QImage(base, width, height, static_cast<int>(bytesPerRow),
-                           QImage::Format_ARGB32)
-                        .copy();
-        }
-    } else if (format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
-               format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) {
-        const int width =
-            static_cast<int>(CVPixelBufferGetWidthOfPlane(pixelBuffer, 0));
-        const int height =
-            static_cast<int>(CVPixelBufferGetHeightOfPlane(pixelBuffer, 0));
-        const auto *yPlane = static_cast<const uchar *>(
-            CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0));
-        const auto *uvPlane = static_cast<const uchar *>(
-            CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1));
-        const size_t yStride =
-            CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0);
-        const size_t uvStride =
-            CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1);
-        if (yPlane != nullptr && uvPlane != nullptr && width > 0 &&
-            height > 0) {
-            image = QImage(width, height, QImage::Format_RGB888);
-            const bool videoRange =
-                format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
-            for (int row = 0; row < height; ++row) {
-                uchar *out = image.scanLine(row);
-                const uchar *yRow =
-                    yPlane + (static_cast<size_t>(row) * yStride);
-                const uchar *uvRow =
-                    uvPlane + (static_cast<size_t>(row / 2) * uvStride);
-                for (int col = 0; col < width; ++col) {
-                    int y = yRow[col];
-                    if (videoRange) {
-                        y = std::max(0, y - 16) * 255 / 219;
-                    }
-                    const size_t uvIndex = static_cast<size_t>(col / 2) * 2;
-                    const int u = static_cast<int>(uvRow[uvIndex]) - 128;
-                    const int v = static_cast<int>(uvRow[uvIndex + 1]) - 128;
-                    const int r = clamp8(static_cast<int>(y + (1.402 * v)));
-                    const int g = clamp8(
-                        static_cast<int>(y - (0.344136 * u) - (0.714136 * v)));
-                    const int b = clamp8(static_cast<int>(y + (1.772 * u)));
-                    out[(col * 3) + 0] = static_cast<uchar>(r);
-                    out[(col * 3) + 1] = static_cast<uchar>(g);
-                    out[(col * 3) + 2] = static_cast<uchar>(b);
-                }
-            }
-        }
-    }
-
-    CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
-    return image;
 }
 
 static float parameter_value_for_id(NSArray<NSDictionary *> *parameterValues,
@@ -1031,15 +1004,15 @@ void VTSController::restartTrackingPipeline(bool resetCalibration) {
       if (face != nullptr) {
           faceSnapshot = *face;
       }
-      const QImage image = imageFromPixelBuffer(pixelBuffer);
+      const RetainedPixelBuffer previewPixelBuffer(pixelBuffer);
       const double confidence =
           hasFace ? static_cast<double>(faceSnapshot.confidence) : 0.0;
 
       QMetaObject::invokeMethod(
           controller,
-          [weakSelf, image, faceSnapshot, hasFace, detectedFaceCount,
-           trackedFaceCount, status, fps, confidence, displayMessage,
-           extraStatusLine, calibrationCompleted]() {
+          [weakSelf, previewPixelBuffer, faceSnapshot, hasFace,
+           detectedFaceCount, trackedFaceCount, status, fps, confidence,
+           displayMessage, extraStatusLine, calibrationCompleted]() {
               if (weakSelf == nullptr) {
                   return;
               }
@@ -1056,7 +1029,8 @@ void VTSController::restartTrackingPipeline(bool resetCalibration) {
               controller->d->lastStatus = status;
               if (controller->d->previewItem != nullptr) {
                   controller->d->previewItem->setFrame(
-                      image, hasFace ? &faceSnapshot : nullptr, hasFace,
+                      previewPixelBuffer.get(),
+                      hasFace ? &faceSnapshot : nullptr, hasFace,
                       detectedFaceCount, trackedFaceCount, status, fps);
               }
               emit controller->statusChanged();
@@ -1118,7 +1092,7 @@ void VTSController::handlePipelineStatus(const QString &message, int status) {
     d->extraStatusLine = currentExtraStatusLineWithParameterValues(
         d.get(), snapshotSettings(d.get()), nil);
     if (d->previewItem != nullptr) {
-        d->previewItem->setFrame(QImage(), nullptr, false, 0, 0, status, 0.0);
+        d->previewItem->setFrame(nullptr, nullptr, false, 0, 0, status, 0.0);
     }
     emit statusChanged();
     emit trackingStatsChanged();

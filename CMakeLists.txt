@@ -25,6 +25,9 @@ qt_standard_project_setup(REQUIRES 6.5)
 set_source_files_properties(apps/vts_source/qml/Main.qml
     PROPERTIES
         QT_RESOURCE_ALIAS Main.qml)
+set_source_files_properties(apps/vts_source/qt/preview_item.cpp
+    PROPERTIES
+        LANGUAGE OBJCXX)
 
 set(APPLECVA_APP_NAME "AppleCVA VTS Source")
 set(APPLECVA_BUNDLE_IDENTIFIER "local.applecva.vts-source")
@@ -42,6 +45,7 @@ set(APPLECVA_FRAMEWORKS
 
 set(VTS_SOURCE_FRAMEWORKS
     AVFoundation
+    Metal
     QuartzCore)
 
 function(target_link_apple_frameworks target visibility)
