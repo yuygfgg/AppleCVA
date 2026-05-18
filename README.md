@@ -59,7 +59,7 @@ All runtime settings are configured in the right-side panel and are saved for th
 
 ## Preview Controls
 
-The preview window must be focused.
+The app window must be focused. Shortcuts are ignored while editing Host or Port.
 
 | Key | Action                                                              |
 | --- | ------------------------------------------------------------------- |

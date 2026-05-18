@@ -15,6 +15,65 @@ ApplicationWindow {
     title: "AppleCVA VTS Source"
     color: "#ffe9f0"
 
+    readonly property bool previewShortcutsEnabled: !hostField.activeFocus && !portField.activeFocus
+
+    function toggleMirrorPreview() {
+        controller.mirrorPreview = !controller.mirrorPreview;
+    }
+
+    function toggleCameraPreview() {
+        controller.showCameraPreview = !controller.showCameraPreview;
+    }
+
+    function toggleLandmarkYFlip() {
+        controller.flipLandmarkY = !controller.flipLandmarkY;
+    }
+
+    function toggleSourceOrigin() {
+        controller.topLeftOrigin = !controller.topLeftOrigin;
+    }
+
+    function toggleOneEuroFilter() {
+        controller.enableFilter = !controller.enableFilter;
+    }
+
+    component PreviewShortcut: Shortcut {
+        context: Qt.WindowShortcut
+        enabled: root.previewShortcutsEnabled
+        autoRepeat: false
+    }
+
+    PreviewShortcut {
+        sequence: "X"
+        onActivated: root.toggleMirrorPreview()
+    }
+
+    PreviewShortcut {
+        sequence: "P"
+        onActivated: root.toggleCameraPreview()
+    }
+
+    PreviewShortcut {
+        sequence: "Y"
+        onActivated: root.toggleLandmarkYFlip()
+    }
+
+    PreviewShortcut {
+        sequence: "B"
+        onActivated: root.toggleSourceOrigin()
+    }
+
+    PreviewShortcut {
+        sequence: "E"
+        onActivated: root.toggleOneEuroFilter()
+    }
+
+    PreviewShortcut {
+        sequence: "C"
+        enabled: root.previewShortcutsEnabled && !controller.calibrationBusy
+        onActivated: controller.startCalibration()
+    }
+
     // Diagonal stripes background
     Canvas {
         anchors.fill: parent
