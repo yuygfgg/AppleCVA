@@ -6,78 +6,156 @@
 static const size_t kVTSMaxCustomParameters = 100;
 static const float kVTSSensitivityDefault = 50.0f;
 
-// Currently not default parameter, but a lot of models use it.
-// Will be default parameter in the future?
-static const char *const kSpecialVTSParameterNames[] = {
-    "EyeSmileLeft",
-    "EyeSmileRight",
-    "BlushWhenSmiling",
-};
-
-static const char *const kCustomBlendshapeNames[APPLECVA_MAX_BLENDSHAPES] = {
-    "ACVAEyeBlinkLeft",       "ACVAEyeBlinkRight",
-    "ACVAEyeSquintLeft",      "ACVAEyeSquintRight",
-    "ACVAEyeLookDownLeft",    "ACVAEyeLookDownRight",
-    "ACVAEyeLookInLeft",      "ACVAEyeLookInRight",
-    "ACVAEyeWideLeft",        "ACVAEyeWideRight",
-    "ACVAEyeLookOutLeft",     "ACVAEyeLookOutRight",
-    "ACVAEyeLookUpLeft",      "ACVAEyeLookUpRight",
-    "ACVABrowDownLeft",       "ACVABrowDownRight",
-    "ACVABrowInnerUp",        "ACVABrowOuterUpLeft",
-    "ACVABrowOuterUpRight",   "ACVAJawOpen",
-    "ACVAMouthClose",         "ACVAJawLeft",
-    "ACVAJawRight",           "ACVAJawForward",
-    "ACVAMouthUpperUpLeft",   "ACVAMouthUpperUpRight",
-    "ACVAMouthLowerDownLeft", "ACVAMouthLowerDownRight",
-    "ACVAMouthRollUpper",     "ACVAMouthRollLower",
-    "ACVAMouthSmileLeft",     "ACVAMouthSmileRight",
-    "ACVAMouthDimpleLeft",    "ACVAMouthDimpleRight",
-    "ACVAMouthStretchLeft",   "ACVAMouthStretchRight",
-    "ACVAMouthFrownLeft",     "ACVAMouthFrownRight",
-    "ACVAMouthPressLeft",     "ACVAMouthPressRight",
-    "ACVAMouthPucker",        "ACVAMouthFunnel",
-    "ACVAMouthLeft",          "ACVAMouthRight",
-    "ACVAMouthShrugLower",    "ACVAMouthShrugUpper",
-    "ACVANoseSneerLeft",      "ACVANoseSneerRight",
-    "ACVACheekPuff",          "ACVACheekSquintLeft",
-    "ACVACheekSquintRight",
-};
-
 typedef struct {
     size_t blendshapeIndex;
     const char *name;
 } VTSAppleCVAIndexedParameterName;
 
+#define VTS_APPLECVA_BLENDSHAPE_LIST(X)                                        \
+    X(0, EyeBlinkLeft)                                                         \
+    X(1, EyeBlinkRight)                                                        \
+    X(2, EyeSquintLeft)                                                        \
+    X(3, EyeSquintRight)                                                       \
+    X(4, EyeLookDownLeft)                                                      \
+    X(5, EyeLookDownRight)                                                     \
+    X(6, EyeLookInLeft)                                                        \
+    X(7, EyeLookInRight)                                                       \
+    X(8, EyeWideLeft)                                                          \
+    X(9, EyeWideRight)                                                         \
+    X(10, EyeLookOutLeft)                                                      \
+    X(11, EyeLookOutRight)                                                     \
+    X(12, EyeLookUpLeft)                                                       \
+    X(13, EyeLookUpRight)                                                      \
+    X(14, BrowDownLeft)                                                        \
+    X(15, BrowDownRight)                                                       \
+    X(16, BrowInnerUp)                                                         \
+    X(17, BrowOuterUpLeft)                                                     \
+    X(18, BrowOuterUpRight)                                                    \
+    X(19, JawOpen)                                                             \
+    X(20, MouthClose)                                                          \
+    X(21, JawLeft)                                                             \
+    X(22, JawRight)                                                            \
+    X(23, JawForward)                                                          \
+    X(24, MouthUpperUpLeft)                                                    \
+    X(25, MouthUpperUpRight)                                                   \
+    X(26, MouthLowerDownLeft)                                                  \
+    X(27, MouthLowerDownRight)                                                 \
+    X(28, MouthRollUpper)                                                      \
+    X(29, MouthRollLower)                                                      \
+    X(30, MouthSmileLeft)                                                      \
+    X(31, MouthSmileRight)                                                     \
+    X(32, MouthDimpleLeft)                                                     \
+    X(33, MouthDimpleRight)                                                    \
+    X(34, MouthStretchLeft)                                                    \
+    X(35, MouthStretchRight)                                                   \
+    X(36, MouthFrownLeft)                                                      \
+    X(37, MouthFrownRight)                                                     \
+    X(38, MouthPressLeft)                                                      \
+    X(39, MouthPressRight)                                                     \
+    X(40, MouthPucker)                                                         \
+    X(41, MouthFunnel)                                                         \
+    X(42, MouthLeft)                                                           \
+    X(43, MouthRight)                                                          \
+    X(44, MouthShrugLower)                                                     \
+    X(45, MouthShrugUpper)                                                     \
+    X(46, NoseSneerLeft)                                                       \
+    X(47, NoseSneerRight)                                                      \
+    X(48, CheekPuff)                                                           \
+    X(49, CheekSquintLeft)                                                     \
+    X(50, CheekSquintRight)
+
+#define VTS_APPLECVA_CUSTOM_NAME(index, name) "ACVA" #name,
+static const char *const kCustomBlendshapeNames[APPLECVA_MAX_BLENDSHAPES] = {
+    VTS_APPLECVA_BLENDSHAPE_LIST(VTS_APPLECVA_CUSTOM_NAME)};
+
+#define VTS_APPLECVA_ARKIT_ALIAS(index, name) {index, #name},
 static const VTSAppleCVAIndexedParameterName kARKitAliasParameters[] = {
-    {0, "EyeBlinkLeft"},        {1, "EyeBlinkRight"},
-    {2, "EyeSquintLeft"},       {3, "EyeSquintRight"},
-    {4, "EyeLookDownLeft"},     {5, "EyeLookDownRight"},
-    {6, "EyeLookInLeft"},       {7, "EyeLookInRight"},
-    {8, "EyeWideLeft"},         {9, "EyeWideRight"},
-    {10, "EyeLookOutLeft"},     {11, "EyeLookOutRight"},
-    {12, "EyeLookUpLeft"},      {13, "EyeLookUpRight"},
-    {14, "BrowDownLeft"},       {15, "BrowDownRight"},
-    {16, "BrowInnerUp"},        {17, "BrowOuterUpLeft"},
-    {18, "BrowOuterUpRight"},   {19, "JawOpen"},
-    {20, "MouthClose"},         {21, "JawLeft"},
-    {22, "JawRight"},           {23, "JawForward"},
-    {24, "MouthUpperUpLeft"},   {25, "MouthUpperUpRight"},
-    {26, "MouthLowerDownLeft"}, {27, "MouthLowerDownRight"},
-    {28, "MouthRollUpper"},     {29, "MouthRollLower"},
-    {30, "MouthSmileLeft"},     {31, "MouthSmileRight"},
-    {32, "MouthDimpleLeft"},    {33, "MouthDimpleRight"},
-    {34, "MouthStretchLeft"},   {35, "MouthStretchRight"},
-    {36, "MouthFrownLeft"},     {37, "MouthFrownRight"},
-    {38, "MouthPressLeft"},     {39, "MouthPressRight"},
-    {40, "MouthPucker"},        {41, "MouthFunnel"},
-    {42, "MouthLeft"},          {43, "MouthRight"},
-    {44, "MouthShrugLower"},    {45, "MouthShrugUpper"},
-    {46, "NoseSneerLeft"},      {47, "NoseSneerRight"},
-    {48, "CheekPuff"},          {49, "CheekSquintLeft"},
-    {50, "CheekSquintRight"},
-};
+    VTS_APPLECVA_BLENDSHAPE_LIST(VTS_APPLECVA_ARKIT_ALIAS)};
+
+#undef VTS_APPLECVA_CUSTOM_NAME
+#undef VTS_APPLECVA_ARKIT_ALIAS
 
 #define ARRAY_COUNT(values) (sizeof(values) / sizeof((values)[0]))
+
+#define VTS_APPLECVA_CALIBRATION_FIELDS(X)                                     \
+    X(faceAngleXZero, faceAngleX)                                              \
+    X(faceAngleYZero, faceAngleY)                                              \
+    X(faceAngleZZero, faceAngleZ)                                              \
+    X(facePositionXZero, facePositionX)                                        \
+    X(facePositionYZero, facePositionY)                                        \
+    X(facePositionZNeutral, facePositionZ)                                     \
+    X(jawOpenNeutral, jawOpen)                                                 \
+    X(eyeOpenLeftNeutral, eyeOpenLeft)                                         \
+    X(eyeOpenRightNeutral, eyeOpenRight)                                       \
+    X(browLeftYNeutral, browLeftY)                                             \
+    X(browRightYNeutral, browRightY)
+
+typedef struct {
+    const char *name;
+    const char *explanation;
+    float minimum;
+    float maximum;
+    float defaultValue;
+} VTSAppleCVAParameterDefinitionSpec;
+
+#define VTS_PARAMETER_DEFINITION(name, explanation, minimum, maximum, value)   \
+    {#name, explanation, minimum, maximum, value}
+
+#define VTS_ACVA_DERIVED_PARAMETERS(X)                                         \
+    X(ACVATongueOut, "AppleCVA tongue out channel", 0.0f, 1.0f, 0.0f,          \
+      tongueOut)                                                               \
+    X(ACVAFaceAngleX, "AppleCVA face yaw in degrees", -45.0f, 45.0f, 0.0f,     \
+      yaw)                                                                     \
+    X(ACVAFaceAngleY, "AppleCVA face pitch in degrees", -45.0f, 45.0f, 0.0f,   \
+      pitch)                                                                   \
+    X(ACVAFaceAngleZ, "AppleCVA face roll in degrees", -45.0f, 45.0f, 0.0f,    \
+      roll)                                                                    \
+    X(ACVAFacePositionX, "AppleCVA calibrated face X position", -10.0f, 10.0f, \
+      0.0f, facePositionX)                                                     \
+    X(ACVAFacePositionY, "AppleCVA calibrated face Y position", -10.0f, 10.0f, \
+      0.0f, facePositionY)                                                     \
+    X(ACVAFacePositionZ, "AppleCVA calibrated face Z position", -10.0f, 10.0f, \
+      0.0f, facePositionZ)                                                     \
+    X(ACVAEyeLeftX, "AppleCVA left eye yaw in degrees", -45.0f, 45.0f, 0.0f,   \
+      acvaEyeLeftX)                                                            \
+    X(ACVAEyeLeftY, "AppleCVA left eye pitch in degrees", -45.0f, 45.0f, 0.0f, \
+      acvaEyeLeftY)                                                            \
+    X(ACVAEyeRightX, "AppleCVA right eye yaw in degrees", -45.0f, 45.0f, 0.0f, \
+      acvaEyeRightX)                                                           \
+    X(ACVAEyeRightY, "AppleCVA right eye pitch in degrees", -45.0f, 45.0f,     \
+      0.0f, acvaEyeRightY)                                                     \
+    X(ACVAEyeOpenLeft, "AppleCVA landmark-derived left eye open", 0.0f, 1.0f,  \
+      1.0f, eyeOpenLeft)                                                       \
+    X(ACVAEyeOpenRight, "AppleCVA landmark-derived right eye open", 0.0f,      \
+      1.0f, 1.0f, eyeOpenRight)                                                \
+    X(ACVAMouthSmile, "AppleCVA mouth smile", 0.0f, 1.0f, 0.0f, mouthSmile)    \
+    X(ACVAMouthX, "AppleCVA mouth X offset", -1.0f, 1.0f, 0.0f, mouthX)        \
+    X(ACVABrowLeftY, "AppleCVA left brow height", 0.0f, 1.0f, 0.5f, browLeftY) \
+    X(ACVABrowRightY, "AppleCVA right brow height", 0.0f, 1.0f, 0.5f,          \
+      browRightY)
+
+#define VTS_SPECIAL_PARAMETERS(X)                                              \
+    X(EyeSmileLeft, "AppleCVA derived left eye smile", 0.0f, 1.0f, 0.0f,       \
+      eyeSmileLeft)                                                            \
+    X(EyeSmileRight, "AppleCVA derived right eye smile", 0.0f, 1.0f, 0.0f,     \
+      eyeSmileRight)                                                           \
+    X(BlushWhenSmiling, "AppleCVA smile-driven blush amount", 0.0f, 1.0f,      \
+      0.0f, blushWhenSmiling)
+
+#define VTS_DEFINITION_FROM_PARAMETER(name, explanation, min, max, def, value) \
+    VTS_PARAMETER_DEFINITION(name, explanation, min, max, def),
+
+static const VTSAppleCVAParameterDefinitionSpec
+    kACVADerivedParameterDefinitions[] = {
+        VTS_ACVA_DERIVED_PARAMETERS(VTS_DEFINITION_FROM_PARAMETER)};
+
+// Currently not default parameters, but a lot of models use them.
+static const VTSAppleCVAParameterDefinitionSpec
+    kSpecialVTSParameterDefinitions[] = {
+        VTS_SPECIAL_PARAMETERS(VTS_DEFINITION_FROM_PARAMETER)};
+
+#undef VTS_DEFINITION_FROM_PARAMETER
+#undef VTS_PARAMETER_DEFINITION
 
 static BOOL parameter_name_is_default(NSString *name,
                                       NSSet<NSString *> *availableDefaults) {
@@ -108,11 +186,12 @@ acva_blendshape_parameter_count(BOOL includeARKitAliases,
     if (!includeACVABlendshapeParameters) {
         return 0;
     }
-    const size_t derivedACVAParameterCount = 17;
+    const size_t derivedACVAParameterCount =
+        ARRAY_COUNT(kACVADerivedParameterDefinitions);
     size_t specialCustomCount = 0;
-    for (size_t i = 0; i < ARRAY_COUNT(kSpecialVTSParameterNames); ++i) {
-        NSString *name =
-            [NSString stringWithUTF8String:kSpecialVTSParameterNames[i]];
+    for (size_t i = 0; i < ARRAY_COUNT(kSpecialVTSParameterDefinitions); ++i) {
+        NSString *name = [NSString
+            stringWithUTF8String:kSpecialVTSParameterDefinitions[i].name];
         if (!parameter_name_is_default(name, availableDefaults)) {
             ++specialCustomCount;
         }
@@ -150,30 +229,12 @@ typedef struct {
     float y;
 } AppleCVALandmarkPoint;
 
+#define VTS_APPLECVA_BLENDSHAPE_ENUM(index, name)                              \
+    VTSAppleCVABlendshape##name = index,
 typedef enum {
-    VTSAppleCVABlendshapeEyeBlinkLeft = 0,
-    VTSAppleCVABlendshapeEyeBlinkRight = 1,
-    VTSAppleCVABlendshapeEyeSquintLeft = 2,
-    VTSAppleCVABlendshapeEyeSquintRight = 3,
-    VTSAppleCVABlendshapeEyeWideLeft = 8,
-    VTSAppleCVABlendshapeEyeWideRight = 9,
-    VTSAppleCVABlendshapeBrowDownLeft = 14,
-    VTSAppleCVABlendshapeBrowDownRight = 15,
-    VTSAppleCVABlendshapeBrowInnerUp = 16,
-    VTSAppleCVABlendshapeBrowOuterUpLeft = 17,
-    VTSAppleCVABlendshapeBrowOuterUpRight = 18,
-    VTSAppleCVABlendshapeJawOpen = 19,
-    VTSAppleCVABlendshapeMouthClose = 20,
-    VTSAppleCVABlendshapeMouthSmileLeft = 30,
-    VTSAppleCVABlendshapeMouthSmileRight = 31,
-    VTSAppleCVABlendshapeMouthFrownLeft = 36,
-    VTSAppleCVABlendshapeMouthFrownRight = 37,
-    VTSAppleCVABlendshapeMouthLeft = 42,
-    VTSAppleCVABlendshapeMouthRight = 43,
-    VTSAppleCVABlendshapeCheekPuff = 48,
-    VTSAppleCVABlendshapeCheekSquintLeft = 49,
-    VTSAppleCVABlendshapeCheekSquintRight = 50,
+    VTS_APPLECVA_BLENDSHAPE_LIST(VTS_APPLECVA_BLENDSHAPE_ENUM)
 } VTSAppleCVABlendshapeIndex;
+#undef VTS_APPLECVA_BLENDSHAPE_ENUM
 
 typedef enum {
     VTSAppleCVALandmarkRightEyeOuterCorner = 0,
@@ -191,6 +252,53 @@ typedef enum {
     VTSAppleCVALandmarkNoseRidgeTip = 43,
     VTSAppleCVALandmarkChinCenter = 59,
 } VTSAppleCVALandmarkIndex;
+
+typedef struct {
+    size_t blink, squint, wide, browDown, browOuterUp;
+    size_t mouthSmile, mouthFrown, cheekSquint;
+} VTSAppleCVASideBlendshapeIndices;
+
+#define VTS_SIDE_BLENDSHAPES(side)                                             \
+    {VTSAppleCVABlendshapeEyeBlink##side,                                      \
+     VTSAppleCVABlendshapeEyeSquint##side,                                     \
+     VTSAppleCVABlendshapeEyeWide##side,                                       \
+     VTSAppleCVABlendshapeBrowDown##side,                                      \
+     VTSAppleCVABlendshapeBrowOuterUp##side,                                   \
+     VTSAppleCVABlendshapeMouthSmile##side,                                    \
+     VTSAppleCVABlendshapeMouthFrown##side,                                    \
+     VTSAppleCVABlendshapeCheekSquint##side}
+
+static const VTSAppleCVASideBlendshapeIndices kSideBlendshapes[] = {
+    VTS_SIDE_BLENDSHAPES(Right),
+    VTS_SIDE_BLENDSHAPES(Left),
+};
+#undef VTS_SIDE_BLENDSHAPES
+
+typedef struct {
+    size_t outer, inner, lowerOuter, lowerInner, upperOuter, upperInner;
+} VTSAppleCVAEyeLandmarkIndices;
+
+#define VTS_EYE_LANDMARKS(side)                                                \
+    {VTSAppleCVALandmark##side##EyeOuterCorner,                                \
+     VTSAppleCVALandmark##side##EyeInnerCorner,                                \
+     VTSAppleCVALandmark##side##EyeLowerOuter,                                 \
+     VTSAppleCVALandmark##side##EyeLowerInner,                                 \
+     VTSAppleCVALandmark##side##EyeUpperOuter,                                 \
+     VTSAppleCVALandmark##side##EyeUpperInner}
+
+static const VTSAppleCVAEyeLandmarkIndices kEyeLandmarks[] = {
+    VTS_EYE_LANDMARKS(Right),
+    VTS_EYE_LANDMARKS(Left),
+};
+#undef VTS_EYE_LANDMARKS
+
+static const VTSAppleCVASideBlendshapeIndices *side_blendshapes(BOOL leftSide) {
+    return &kSideBlendshapes[leftSide ? 1 : 0];
+}
+
+static const VTSAppleCVAEyeLandmarkIndices *eye_landmarks(BOOL leftEye) {
+    return &kEyeLandmarks[leftEye ? 1 : 0];
+}
 
 static float clampf(float value, float minimum, float maximum) {
     if (!isfinite(value)) {
@@ -276,12 +384,56 @@ static NSDictionary *parameter_definition(NSString *name, NSString *explanation,
     };
 }
 
+static void
+add_parameter_definitions(NSMutableArray *definitions,
+                          const VTSAppleCVAParameterDefinitionSpec *specs,
+                          size_t count, NSSet<NSString *> *availableDefaults,
+                          BOOL skipDefaults) {
+    for (size_t i = 0; i < count; ++i) {
+        NSString *name = [NSString stringWithUTF8String:specs[i].name];
+        if (skipDefaults &&
+            parameter_name_is_default(name, availableDefaults)) {
+            continue;
+        }
+        NSString *explanation =
+            [NSString stringWithUTF8String:specs[i].explanation];
+        [definitions addObject:parameter_definition(
+                                   name, explanation, specs[i].minimum,
+                                   specs[i].maximum, specs[i].defaultValue)];
+    }
+}
+
 static NSDictionary *parameter_value(NSString *id, float value) {
     return @{
         @"id" : id,
         @"value" : json_float(value),
         @"weight" : @1.0,
     };
+}
+
+typedef struct {
+    const char *name;
+    float value;
+} VTSAppleCVAParameterValueSpec;
+
+#define VTS_PARAMETER_VALUE(name, value) {#name, value}
+#define VTS_VALUE_FROM_PARAMETER(name, explanation, min, max, def, value)      \
+    VTS_PARAMETER_VALUE(name, value),
+
+static void add_parameter_values(NSMutableArray *values,
+                                 NSSet<NSString *> *availableDefaults,
+                                 const VTSAppleCVAParameterValueSpec *specs,
+                                 size_t count, BOOL onlyDefaults,
+                                 BOOL skipDefaults) {
+    for (size_t i = 0; i < count; ++i) {
+        NSString *name = [NSString stringWithUTF8String:specs[i].name];
+        const BOOL isDefault =
+            parameter_name_is_default(name, availableDefaults);
+        if ((onlyDefaults && !isDefault) || (skipDefaults && isDefault)) {
+            continue;
+        }
+        [values addObject:parameter_value(name, specs[i].value)];
+    }
 }
 
 static BOOL matrix_has_signal(const float values[9]) {
@@ -533,35 +685,19 @@ adjusted_blendshape_value(const AppleCVATrackedFace *face,
 
 static float eye_open_from_landmarks(const AppleCVATrackedFace *face,
                                      BOOL leftEye) {
-    const size_t outerIndex = leftEye ? VTSAppleCVALandmarkLeftEyeOuterCorner
-                                      : VTSAppleCVALandmarkRightEyeOuterCorner;
-    const size_t innerIndex = leftEye ? VTSAppleCVALandmarkLeftEyeInnerCorner
-                                      : VTSAppleCVALandmarkRightEyeInnerCorner;
-    const size_t lowerOuterIndex = leftEye
-                                       ? VTSAppleCVALandmarkLeftEyeLowerOuter
-                                       : VTSAppleCVALandmarkRightEyeLowerOuter;
-    const size_t lowerInnerIndex = leftEye
-                                       ? VTSAppleCVALandmarkLeftEyeLowerInner
-                                       : VTSAppleCVALandmarkRightEyeLowerInner;
-    const size_t upperOuterIndex = leftEye
-                                       ? VTSAppleCVALandmarkLeftEyeUpperOuter
-                                       : VTSAppleCVALandmarkRightEyeUpperOuter;
-    const size_t upperInnerIndex = leftEye
-                                       ? VTSAppleCVALandmarkLeftEyeUpperInner
-                                       : VTSAppleCVALandmarkRightEyeUpperInner;
-
+    const VTSAppleCVAEyeLandmarkIndices *eye = eye_landmarks(leftEye);
     AppleCVALandmarkPoint outer;
     AppleCVALandmarkPoint inner;
     AppleCVALandmarkPoint lowerOuter;
     AppleCVALandmarkPoint lowerInner;
     AppleCVALandmarkPoint upperOuter;
     AppleCVALandmarkPoint upperInner;
-    if (!landmark_point(face, outerIndex, &outer) ||
-        !landmark_point(face, innerIndex, &inner) ||
-        !landmark_point(face, lowerOuterIndex, &lowerOuter) ||
-        !landmark_point(face, lowerInnerIndex, &lowerInner) ||
-        !landmark_point(face, upperOuterIndex, &upperOuter) ||
-        !landmark_point(face, upperInnerIndex, &upperInner)) {
+    if (!landmark_point(face, eye->outer, &outer) ||
+        !landmark_point(face, eye->inner, &inner) ||
+        !landmark_point(face, eye->lowerOuter, &lowerOuter) ||
+        !landmark_point(face, eye->lowerInner, &lowerInner) ||
+        !landmark_point(face, eye->upperOuter, &upperOuter) ||
+        !landmark_point(face, eye->upperInner, &upperInner)) {
         return NAN;
     }
 
@@ -581,18 +717,15 @@ static float eye_open_measurement(const AppleCVATrackedFace *face,
         return 1.0f;
     }
 
-    const size_t blinkIndex = leftEye ? VTSAppleCVABlendshapeEyeBlinkLeft
-                                      : VTSAppleCVABlendshapeEyeBlinkRight;
-    const size_t wideIndex = leftEye ? VTSAppleCVABlendshapeEyeWideLeft
-                                     : VTSAppleCVABlendshapeEyeWideRight;
-    const float blinkClosed = remap_clamped(blendshape_at(face, blinkIndex),
+    const VTSAppleCVASideBlendshapeIndices *side = side_blendshapes(leftEye);
+    const float blinkClosed = remap_clamped(blendshape_at(face, side->blink),
                                             0.06f, 0.45f, 0.0f, 1.0f);
     const float blendOpen = 1.0f - blinkClosed;
     const float landmarkOpen = eye_open_from_landmarks(face, leftEye);
     float value =
         isfinite(landmarkOpen) ? fminf(landmarkOpen, blendOpen) : blendOpen;
     if (blinkClosed < 0.2f) {
-        value += blendshape_at(face, wideIndex) * 0.15f;
+        value += blendshape_at(face, side->wide) * 0.15f;
     }
     return clamp01(value);
 }
@@ -733,17 +866,10 @@ void VTSAppleCVACalibrationFromObservedSamples(
         if (!samples[i].valid) {
             continue;
         }
-        sum.faceAngleXZero += samples[i].faceAngleX;
-        sum.faceAngleYZero += samples[i].faceAngleY;
-        sum.faceAngleZZero += samples[i].faceAngleZ;
-        sum.facePositionXZero += samples[i].facePositionX;
-        sum.facePositionYZero += samples[i].facePositionY;
-        sum.facePositionZNeutral += samples[i].facePositionZ;
-        sum.jawOpenNeutral += samples[i].jawOpen;
-        sum.eyeOpenLeftNeutral += samples[i].eyeOpenLeft;
-        sum.eyeOpenRightNeutral += samples[i].eyeOpenRight;
-        sum.browLeftYNeutral += samples[i].browLeftY;
-        sum.browRightYNeutral += samples[i].browRightY;
+#define VTS_ACCUMULATE_CALIBRATION_FIELD(zero, observed)                       \
+    sum.zero += samples[i].observed;
+        VTS_APPLECVA_CALIBRATION_FIELDS(VTS_ACCUMULATE_CALIBRATION_FIELD)
+#undef VTS_ACCUMULATE_CALIBRATION_FIELD
         ++count;
     }
     if (count == 0) {
@@ -752,17 +878,10 @@ void VTSAppleCVACalibrationFromObservedSamples(
 
     const float scale = 1.0f / (float)count;
     outCalibration->valid = true;
-    outCalibration->faceAngleXZero = sum.faceAngleXZero * scale;
-    outCalibration->faceAngleYZero = sum.faceAngleYZero * scale;
-    outCalibration->faceAngleZZero = sum.faceAngleZZero * scale;
-    outCalibration->facePositionXZero = sum.facePositionXZero * scale;
-    outCalibration->facePositionYZero = sum.facePositionYZero * scale;
-    outCalibration->facePositionZNeutral = sum.facePositionZNeutral * scale;
-    outCalibration->jawOpenNeutral = sum.jawOpenNeutral * scale;
-    outCalibration->eyeOpenLeftNeutral = sum.eyeOpenLeftNeutral * scale;
-    outCalibration->eyeOpenRightNeutral = sum.eyeOpenRightNeutral * scale;
-    outCalibration->browLeftYNeutral = sum.browLeftYNeutral * scale;
-    outCalibration->browRightYNeutral = sum.browRightYNeutral * scale;
+#define VTS_STORE_CALIBRATION_FIELD(zero, observed)                            \
+    outCalibration->zero = sum.zero * scale;
+    VTS_APPLECVA_CALIBRATION_FIELDS(VTS_STORE_CALIBRATION_FIELD)
+#undef VTS_STORE_CALIBRATION_FIELD
 }
 
 static float
@@ -771,12 +890,9 @@ mouth_smile_side_value(const AppleCVATrackedFace *face, BOOL leftSide,
     if (face == NULL) {
         return 0.0f;
     }
-    const size_t smileIndex = leftSide ? VTSAppleCVABlendshapeMouthSmileLeft
-                                       : VTSAppleCVABlendshapeMouthSmileRight;
-    const size_t frownIndex = leftSide ? VTSAppleCVABlendshapeMouthFrownLeft
-                                       : VTSAppleCVABlendshapeMouthFrownRight;
-    const float smile = blendshape_at(face, smileIndex);
-    const float frown = blendshape_at(face, frownIndex);
+    const VTSAppleCVASideBlendshapeIndices *side = side_blendshapes(leftSide);
+    const float smile = blendshape_at(face, side->mouthSmile);
+    const float frown = blendshape_at(face, side->mouthFrown);
     return apply_zero_based_sensitivity(
         smile - (frown * 0.35f),
         sensitivity != NULL ? sensitivity->mouthSmile : kVTSSensitivityDefault);
@@ -809,24 +925,13 @@ eye_smile_value(const AppleCVATrackedFace *face, BOOL leftEye,
         return 0.0f;
     }
 
-    const size_t eyeSquintIndex = leftEye ? VTSAppleCVABlendshapeEyeSquintLeft
-                                          : VTSAppleCVABlendshapeEyeSquintRight;
-    const size_t cheekSquintIndex = leftEye
-                                        ? VTSAppleCVABlendshapeCheekSquintLeft
-                                        : VTSAppleCVABlendshapeCheekSquintRight;
-    const size_t mouthFrownIndex = leftEye
-                                       ? VTSAppleCVABlendshapeMouthFrownLeft
-                                       : VTSAppleCVABlendshapeMouthFrownRight;
-    const size_t browDownIndex = leftEye ? VTSAppleCVABlendshapeBrowDownLeft
-                                         : VTSAppleCVABlendshapeBrowDownRight;
-    const size_t blinkIndex = leftEye ? VTSAppleCVABlendshapeEyeBlinkLeft
-                                      : VTSAppleCVABlendshapeEyeBlinkRight;
+    const VTSAppleCVASideBlendshapeIndices *side = side_blendshapes(leftEye);
     const float mouthSmile = mouth_smile_side_value(face, leftEye, sensitivity);
-    const float eyeSquint = blendshape_at(face, eyeSquintIndex);
-    const float cheekSquint = blendshape_at(face, cheekSquintIndex);
-    const float mouthFrown = blendshape_at(face, mouthFrownIndex);
-    const float browDown = blendshape_at(face, browDownIndex);
-    const float blink = blendshape_at(face, blinkIndex);
+    const float eyeSquint = blendshape_at(face, side->squint);
+    const float cheekSquint = blendshape_at(face, side->cheekSquint);
+    const float mouthFrown = blendshape_at(face, side->mouthFrown);
+    const float browDown = blendshape_at(face, side->browDown);
+    const float blink = blendshape_at(face, side->blink);
     const float narrowing = eye_narrowing_value(face, leftEye, calibration);
     const float smileGate = remap_clamped(mouthSmile, 0.08f, 0.62f, 0.0f, 1.0f);
     const float eyeGate = remap_clamped(
@@ -861,12 +966,9 @@ static float brow_y_value(const AppleCVATrackedFace *face, BOOL leftBrow,
     if (face == NULL) {
         return 0.5f;
     }
-    const float browDown =
-        blendshape_at(face, leftBrow ? VTSAppleCVABlendshapeBrowDownLeft
-                                     : VTSAppleCVABlendshapeBrowDownRight);
-    const float outerUp =
-        blendshape_at(face, leftBrow ? VTSAppleCVABlendshapeBrowOuterUpLeft
-                                     : VTSAppleCVABlendshapeBrowOuterUpRight);
+    const VTSAppleCVASideBlendshapeIndices *side = side_blendshapes(leftBrow);
+    const float browDown = blendshape_at(face, side->browDown);
+    const float outerUp = blendshape_at(face, side->browOuterUp);
     const float innerUp = blendshape_at(face, VTSAppleCVABlendshapeBrowInnerUp);
     const float value =
         clamp01(0.5f + (((outerUp + innerUp) * 0.5f - browDown) * 0.5f));
@@ -889,12 +991,11 @@ static float eye_degrees_to_vts(float radians) {
     return clampf(radians * (180.0f / (float)M_PI) / 30.0f, -1.0f, 1.0f);
 }
 
-static void add_default_parameter(NSMutableArray *values,
-                                  NSSet<NSString *> *availableDefaults,
-                                  NSString *name, float value) {
-    if ([availableDefaults containsObject:name]) {
-        [values addObject:parameter_value(name, value)];
+static float eye_radians_to_acva_degrees(float radians) {
+    if (!isfinite(radians)) {
+        return 0.0f;
     }
+    return clampf(radians * (180.0f / (float)M_PI), -45.0f, 45.0f);
 }
 
 NSArray<NSDictionary *> *
@@ -903,86 +1004,12 @@ VTSAppleCVACustomParameterDefinitions(BOOL includeARKitAliases,
                                       NSSet<NSString *> *availableDefaults) {
     NSMutableArray *definitions =
         [NSMutableArray arrayWithCapacity:kVTSMaxCustomParameters];
-    [definitions addObject:parameter_definition(@"ACVATongueOut",
-                                                @"AppleCVA tongue out channel",
-                                                0.0f, 1.0f, 0.0f)];
-    [definitions addObject:parameter_definition(@"ACVAFaceAngleX",
-                                                @"AppleCVA face yaw in degrees",
-                                                -45.0f, 45.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAFaceAngleY",
-                                       @"AppleCVA face pitch in degrees",
-                                       -45.0f, 45.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAFaceAngleZ",
-                                       @"AppleCVA face roll in degrees", -45.0f,
-                                       45.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAFacePositionX",
-                                       @"AppleCVA calibrated face X position",
-                                       -10.0f, 10.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAFacePositionY",
-                                       @"AppleCVA calibrated face Y position",
-                                       -10.0f, 10.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAFacePositionZ",
-                                       @"AppleCVA calibrated face Z position",
-                                       -10.0f, 10.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAEyeLeftX",
-                                       @"AppleCVA left eye yaw in degrees",
-                                       -45.0f, 45.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAEyeLeftY",
-                                       @"AppleCVA left eye pitch in degrees",
-                                       -45.0f, 45.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAEyeRightX",
-                                       @"AppleCVA right eye yaw in degrees",
-                                       -45.0f, 45.0f, 0.0f)];
-    [definitions
-        addObject:parameter_definition(@"ACVAEyeRightY",
-                                       @"AppleCVA right eye pitch in degrees",
-                                       -45.0f, 45.0f, 0.0f)];
-    [definitions addObject:parameter_definition(
-                               @"ACVAEyeOpenLeft",
-                               @"AppleCVA landmark-derived left eye open", 0.0f,
-                               1.0f, 1.0f)];
-    [definitions addObject:parameter_definition(
-                               @"ACVAEyeOpenRight",
-                               @"AppleCVA landmark-derived right eye open",
-                               0.0f, 1.0f, 1.0f)];
-    [definitions addObject:parameter_definition(@"ACVAMouthSmile",
-                                                @"AppleCVA mouth smile", 0.0f,
-                                                1.0f, 0.0f)];
-    [definitions addObject:parameter_definition(@"ACVAMouthX",
-                                                @"AppleCVA mouth X offset",
-                                                -1.0f, 1.0f, 0.0f)];
-    [definitions addObject:parameter_definition(@"ACVABrowLeftY",
-                                                @"AppleCVA left brow height",
-                                                0.0f, 1.0f, 0.5f)];
-    [definitions addObject:parameter_definition(@"ACVABrowRightY",
-                                                @"AppleCVA right brow height",
-                                                0.0f, 1.0f, 0.5f)];
-    if (!parameter_name_is_default(@"EyeSmileLeft", availableDefaults)) {
-        [definitions
-            addObject:parameter_definition(@"EyeSmileLeft",
-                                           @"AppleCVA derived left eye smile",
-                                           0.0f, 1.0f, 0.0f)];
-    }
-    if (!parameter_name_is_default(@"EyeSmileRight", availableDefaults)) {
-        [definitions
-            addObject:parameter_definition(@"EyeSmileRight",
-                                           @"AppleCVA derived right eye smile",
-                                           0.0f, 1.0f, 0.0f)];
-    }
-    if (!parameter_name_is_default(@"BlushWhenSmiling", availableDefaults)) {
-        [definitions addObject:parameter_definition(
-                                   @"BlushWhenSmiling",
-                                   @"AppleCVA smile-driven blush amount", 0.0f,
-                                   1.0f, 0.0f)];
-    }
+    add_parameter_definitions(definitions, kACVADerivedParameterDefinitions,
+                              ARRAY_COUNT(kACVADerivedParameterDefinitions),
+                              nil, NO);
+    add_parameter_definitions(definitions, kSpecialVTSParameterDefinitions,
+                              ARRAY_COUNT(kSpecialVTSParameterDefinitions),
+                              availableDefaults, YES);
     if (includeARKitAliases) {
         for (size_t i = 0; i < ARRAY_COUNT(kARKitAliasParameters); ++i) {
             const VTSAppleCVAIndexedParameterName alias =
@@ -1079,56 +1106,53 @@ NSArray<NSDictionary *> *VTSAppleCVAParameterValues(
         face != NULL ? eye_degrees_to_vts(face->right_eye_yaw) : 0.0f;
     const float eyeRightY =
         face != NULL ? eye_degrees_to_vts(face->right_eye_pitch) : 0.0f;
+    const float tongueOut = face != NULL ? clamp01(face->tongue_out) : 0.0f;
+    const float acvaEyeLeftX =
+        face != NULL ? eye_radians_to_acva_degrees(face->left_eye_yaw) : 0.0f;
+    const float acvaEyeLeftY =
+        face != NULL ? eye_radians_to_acva_degrees(face->left_eye_pitch) : 0.0f;
+    const float acvaEyeRightX =
+        face != NULL ? eye_radians_to_acva_degrees(face->right_eye_yaw) : 0.0f;
+    const float acvaEyeRightY =
+        face != NULL ? eye_radians_to_acva_degrees(face->right_eye_pitch)
+                     : 0.0f;
 
     if (availableDefaultParameters != nil) {
-        add_default_parameter(values, availableDefaultParameters, @"FaceAngleX",
-                              yaw);
-        add_default_parameter(values, availableDefaultParameters, @"FaceAngleY",
-                              pitch);
-        add_default_parameter(values, availableDefaultParameters, @"FaceAngleZ",
-                              roll);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"FacePositionX", facePositionX);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"FacePositionY", facePositionY);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"FacePositionZ", facePositionZ);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"EyeOpenLeft", eyeOpenLeft);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"EyeOpenRight", eyeOpenRight);
-        add_default_parameter(values, availableDefaultParameters, @"EyeLeftX",
-                              eyeLeftX);
-        add_default_parameter(values, availableDefaultParameters, @"EyeLeftY",
-                              eyeLeftY);
-        add_default_parameter(values, availableDefaultParameters, @"EyeRightX",
-                              eyeRightX);
-        add_default_parameter(values, availableDefaultParameters, @"EyeRightY",
-                              eyeRightY);
-        add_default_parameter(values, availableDefaultParameters, @"MouthOpen",
-                              mouthOpen);
-        add_default_parameter(values, availableDefaultParameters, @"MouthSmile",
-                              mouthSmile);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"EyeSmileLeft", eyeSmileLeft);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"EyeSmileRight", eyeSmileRight);
-        add_default_parameter(values, availableDefaultParameters,
-                              @"BlushWhenSmiling", blushWhenSmiling);
-        add_default_parameter(values, availableDefaultParameters, @"MouthX",
-                              mouthX);
-        add_default_parameter(values, availableDefaultParameters, @"Brows",
-                              (browLeftY + browRightY) * 0.5f);
-        add_default_parameter(values, availableDefaultParameters, @"BrowLeftY",
-                              browLeftY);
-        add_default_parameter(values, availableDefaultParameters, @"BrowRightY",
-                              browRightY);
-        add_default_parameter(values, availableDefaultParameters, @"TongueOut",
-                              face != NULL ? clamp01(face->tongue_out) : 0.0f);
+        const VTSAppleCVAParameterValueSpec defaultValues[] = {
+            VTS_PARAMETER_VALUE(FaceAngleX, yaw),
+            VTS_PARAMETER_VALUE(FaceAngleY, pitch),
+            VTS_PARAMETER_VALUE(FaceAngleZ, roll),
+            VTS_PARAMETER_VALUE(FacePositionX, facePositionX),
+            VTS_PARAMETER_VALUE(FacePositionY, facePositionY),
+            VTS_PARAMETER_VALUE(FacePositionZ, facePositionZ),
+            VTS_PARAMETER_VALUE(EyeOpenLeft, eyeOpenLeft),
+            VTS_PARAMETER_VALUE(EyeOpenRight, eyeOpenRight),
+            VTS_PARAMETER_VALUE(EyeLeftX, eyeLeftX),
+            VTS_PARAMETER_VALUE(EyeLeftY, eyeLeftY),
+            VTS_PARAMETER_VALUE(EyeRightX, eyeRightX),
+            VTS_PARAMETER_VALUE(EyeRightY, eyeRightY),
+            VTS_PARAMETER_VALUE(MouthOpen, mouthOpen),
+            VTS_PARAMETER_VALUE(MouthSmile, mouthSmile),
+            VTS_PARAMETER_VALUE(EyeSmileLeft, eyeSmileLeft),
+            VTS_PARAMETER_VALUE(EyeSmileRight, eyeSmileRight),
+            VTS_PARAMETER_VALUE(BlushWhenSmiling, blushWhenSmiling),
+            VTS_PARAMETER_VALUE(MouthX, mouthX),
+            VTS_PARAMETER_VALUE(Brows, (browLeftY + browRightY) * 0.5f),
+            VTS_PARAMETER_VALUE(BrowLeftY, browLeftY),
+            VTS_PARAMETER_VALUE(BrowRightY, browRightY),
+            VTS_PARAMETER_VALUE(TongueOut, tongueOut),
+        };
+        add_parameter_values(values, availableDefaultParameters, defaultValues,
+                             ARRAY_COUNT(defaultValues), YES, NO);
         if (!includeCustomParameters || !includeARKitAliases) {
-            add_default_parameter(
-                values, availableDefaultParameters, @"CheekPuff",
-                blendshape_at(face, VTSAppleCVABlendshapeCheekPuff));
+            const VTSAppleCVAParameterValueSpec cheekPuffValue[] = {
+                VTS_PARAMETER_VALUE(
+                    CheekPuff,
+                    blendshape_at(face, VTSAppleCVABlendshapeCheekPuff)),
+            };
+            add_parameter_values(values, availableDefaultParameters,
+                                 cheekPuffValue, ARRAY_COUNT(cheekPuffValue),
+                                 YES, NO);
         }
     }
 
@@ -1136,19 +1160,10 @@ NSArray<NSDictionary *> *VTSAppleCVAParameterValues(
         return values;
     }
 
-    if (!parameter_name_is_default(@"EyeSmileLeft",
-                                   availableDefaultParameters)) {
-        [values addObject:parameter_value(@"EyeSmileLeft", eyeSmileLeft)];
-    }
-    if (!parameter_name_is_default(@"EyeSmileRight",
-                                   availableDefaultParameters)) {
-        [values addObject:parameter_value(@"EyeSmileRight", eyeSmileRight)];
-    }
-    if (!parameter_name_is_default(@"BlushWhenSmiling",
-                                   availableDefaultParameters)) {
-        [values
-            addObject:parameter_value(@"BlushWhenSmiling", blushWhenSmiling)];
-    }
+    const VTSAppleCVAParameterValueSpec specialValues[] = {
+        VTS_SPECIAL_PARAMETERS(VTS_VALUE_FROM_PARAMETER)};
+    add_parameter_values(values, availableDefaultParameters, specialValues,
+                         ARRAY_COUNT(specialValues), NO, YES);
 
     if (includeARKitAliases) {
         for (size_t i = 0; i < ARRAY_COUNT(kARKitAliasParameters); ++i) {
@@ -1170,44 +1185,9 @@ NSArray<NSDictionary *> *VTSAppleCVAParameterValues(
             [NSString stringWithUTF8String:kCustomBlendshapeNames[i]];
         [values addObject:parameter_value(name, blendshape_at(face, i))];
     }
-    [values addObject:parameter_value(@"ACVATongueOut",
-                                      face != NULL ? clamp01(face->tongue_out)
-                                                   : 0.0f)];
-    [values addObject:parameter_value(@"ACVAFaceAngleX", yaw)];
-    [values addObject:parameter_value(@"ACVAFaceAngleY", pitch)];
-    [values addObject:parameter_value(@"ACVAFaceAngleZ", roll)];
-    [values addObject:parameter_value(@"ACVAFacePositionX", facePositionX)];
-    [values addObject:parameter_value(@"ACVAFacePositionY", facePositionY)];
-    [values addObject:parameter_value(@"ACVAFacePositionZ", facePositionZ)];
-    [values addObject:parameter_value(@"ACVAEyeLeftX",
-                                      face != NULL
-                                          ? clampf(face->left_eye_yaw * 180.0f /
-                                                       (float)M_PI,
-                                                   -45.0f, 45.0f)
-                                          : 0.0f)];
-    [values addObject:parameter_value(@"ACVAEyeLeftY",
-                                      face != NULL
-                                          ? clampf(face->left_eye_pitch *
-                                                       180.0f / (float)M_PI,
-                                                   -45.0f, 45.0f)
-                                          : 0.0f)];
-    [values addObject:parameter_value(@"ACVAEyeRightX",
-                                      face != NULL
-                                          ? clampf(face->right_eye_yaw *
-                                                       180.0f / (float)M_PI,
-                                                   -45.0f, 45.0f)
-                                          : 0.0f)];
-    [values addObject:parameter_value(@"ACVAEyeRightY",
-                                      face != NULL
-                                          ? clampf(face->right_eye_pitch *
-                                                       180.0f / (float)M_PI,
-                                                   -45.0f, 45.0f)
-                                          : 0.0f)];
-    [values addObject:parameter_value(@"ACVAEyeOpenLeft", eyeOpenLeft)];
-    [values addObject:parameter_value(@"ACVAEyeOpenRight", eyeOpenRight)];
-    [values addObject:parameter_value(@"ACVAMouthSmile", mouthSmile)];
-    [values addObject:parameter_value(@"ACVAMouthX", mouthX)];
-    [values addObject:parameter_value(@"ACVABrowLeftY", browLeftY)];
-    [values addObject:parameter_value(@"ACVABrowRightY", browRightY)];
+    const VTSAppleCVAParameterValueSpec acvaValues[] = {
+        VTS_ACVA_DERIVED_PARAMETERS(VTS_VALUE_FROM_PARAMETER)};
+    add_parameter_values(values, nil, acvaValues, ARRAY_COUNT(acvaValues), NO,
+                         NO);
     return values;
 }

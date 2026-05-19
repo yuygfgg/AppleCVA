@@ -221,6 +221,28 @@ static int sanitize_backend_mode(int mode) {
     }
 }
 
+template <typename T>
+static bool updateSetting(VTSController::Impl *impl,
+                          T VTSController::Impl::*field, const T &value) {
+    std::lock_guard<std::mutex> lock(impl->settingsMutex);
+    if (impl->*field == value) {
+        return false;
+    }
+    impl->*field = value;
+    return true;
+}
+
+template <typename T>
+static bool updatePodSetting(VTSController::Impl *impl,
+                             T VTSController::Impl::*field, const T &value) {
+    std::lock_guard<std::mutex> lock(impl->settingsMutex);
+    if (std::memcmp(&(impl->*field), &value, sizeof(T)) == 0) {
+        return false;
+    }
+    impl->*field = value;
+    return true;
+}
+
 static SettingsSnapshot snapshotSettings(const VTSController::Impl *impl) {
     std::lock_guard<std::mutex> lock(impl->settingsMutex);
     SettingsSnapshot snapshot;
@@ -462,35 +484,62 @@ QStringList VTSController::cameraNames() const { return d->cameraNames; }
 
 int VTSController::cameraIndex() const { return d->cameraIndex; }
 
-int VTSController::backendMode() const {
-    return snapshotSettings(d.get()).backendMode;
-}
+#define VTS_DEFINE_SETTING_GETTER(ReturnType, Getter, Field)                   \
+    ReturnType VTSController::Getter() const {                                 \
+        return snapshotSettings(d.get()).Field;                                \
+    }
+
+#define VTS_DEFINE_BOOL_SETTING(Getter, Setter, Field, Signal, ChangedAction)  \
+    VTS_DEFINE_SETTING_GETTER(bool, Getter, Field)                             \
+    void VTSController::Setter(bool enabled) {                                 \
+        if (!updateSetting(d.get(), &VTSController::Impl::Field, enabled)) {   \
+            return;                                                            \
+        }                                                                      \
+        ChangedAction saveSettings();                                          \
+        emit Signal();                                                         \
+    }
+
+#define VTS_DEFINE_ONE_EURO_PARAMETER(Getter, Setter, Field, MinCutoff, Beta,  \
+                                      DerivativeCutoff)                        \
+    double VTSController::Getter() const {                                     \
+        return snapshotSettings(d.get()).oneEuroParameters.Field;              \
+    }                                                                          \
+    void VTSController::Setter(double value) {                                 \
+        const AppleCVAOneEuroParameters parameters =                           \
+            snapshotSettings(d.get()).oneEuroParameters;                       \
+        applyOneEuroParameters(MinCutoff, Beta, DerivativeCutoff);             \
+    }
+
+#define VTS_DEFINE_SENSITIVITY_PARAMETER(Getter, Setter, Field, Blink,         \
+                                         EyeOpen, MouthOpen, MouthSmile, Brow) \
+    double VTSController::Getter() const {                                     \
+        return snapshotSettings(d.get()).sensitivityParameters.Field;          \
+    }                                                                          \
+    void VTSController::Setter(double value) {                                 \
+        const VTSAppleCVASensitivityParameters parameters =                    \
+            snapshotSettings(d.get()).sensitivityParameters;                   \
+        applySensitivityParameters(Blink, EyeOpen, MouthOpen, MouthSmile,      \
+                                   Brow);                                      \
+    }
+
+VTS_DEFINE_SETTING_GETTER(int, backendMode, backendMode)
 
 void VTSController::setBackendMode(int mode) {
     const int backendMode = sanitize_backend_mode(mode);
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->backendMode == backendMode) {
-            return;
-        }
-        d->backendMode = backendMode;
+    if (!updateSetting(d.get(), &VTSController::Impl::backendMode,
+                       backendMode)) {
+        return;
     }
     saveSettings();
     emit backendModeChanged();
     restartTrackingPipeline(true);
 }
 
-bool VTSController::enableFilter() const {
-    return snapshotSettings(d.get()).enableFilter;
-}
+VTS_DEFINE_SETTING_GETTER(bool, enableFilter, enableFilter)
 
 void VTSController::setEnableFilter(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->enableFilter == enabled) {
-            return;
-        }
-        d->enableFilter = enabled;
+    if (!updateSetting(d.get(), &VTSController::Impl::enableFilter, enabled)) {
+        return;
     }
     const SettingsSnapshot settings = snapshotSettings(d.get());
     if (d->pipeline != nil) {
@@ -501,211 +550,61 @@ void VTSController::setEnableFilter(bool enabled) {
     emit enableFilterChanged();
 }
 
-bool VTSController::includeCustomParameters() const {
-    return snapshotSettings(d.get()).includeCustomParameters;
-}
+VTS_DEFINE_BOOL_SETTING(includeCustomParameters, setIncludeCustomParameters,
+                        includeCustomParameters, includeCustomParametersChanged,
+                        stopVTSClient();)
+VTS_DEFINE_BOOL_SETTING(includeARKitAliases, setIncludeARKitAliases,
+                        includeARKitAliases, includeARKitAliasesChanged,
+                        stopVTSClient();)
+VTS_DEFINE_BOOL_SETTING(includeACVABlendshapeParameters,
+                        setIncludeACVABlendshapeParameters,
+                        includeACVABlendshapeParameters,
+                        includeACVABlendshapeParametersChanged,
+                        stopVTSClient();)
+VTS_DEFINE_BOOL_SETTING(mirrorPreview, setMirrorPreview, mirrorPreview,
+                        mirrorPreviewChanged, )
+VTS_DEFINE_BOOL_SETTING(showCameraPreview, setShowCameraPreview,
+                        showCameraPreview, showCameraPreviewChanged, )
+VTS_DEFINE_BOOL_SETTING(flipLandmarkY, setFlipLandmarkY, flipLandmarkY,
+                        flipLandmarkYChanged, )
+VTS_DEFINE_BOOL_SETTING(topLeftOrigin, setTopLeftOrigin, topLeftOrigin,
+                        topLeftOriginChanged, )
 
-void VTSController::setIncludeCustomParameters(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->includeCustomParameters == enabled) {
-            return;
-        }
-        d->includeCustomParameters = enabled;
-    }
-    stopVTSClient();
-    saveSettings();
-    emit includeCustomParametersChanged();
-}
+VTS_DEFINE_ONE_EURO_PARAMETER(oneEuroMinCutoff, setOneEuroMinCutoff, min_cutoff,
+                              value, parameters.beta,
+                              parameters.derivative_cutoff)
+VTS_DEFINE_ONE_EURO_PARAMETER(oneEuroBeta, setOneEuroBeta, beta,
+                              parameters.min_cutoff, value,
+                              parameters.derivative_cutoff)
+VTS_DEFINE_ONE_EURO_PARAMETER(oneEuroDerivativeCutoff,
+                              setOneEuroDerivativeCutoff, derivative_cutoff,
+                              parameters.min_cutoff, parameters.beta, value)
 
-bool VTSController::includeARKitAliases() const {
-    return snapshotSettings(d.get()).includeARKitAliases;
-}
+VTS_DEFINE_SENSITIVITY_PARAMETER(blinkSensitivity, setBlinkSensitivity, blink,
+                                 value, parameters.eyeOpen,
+                                 parameters.mouthOpen, parameters.mouthSmile,
+                                 parameters.brow)
+VTS_DEFINE_SENSITIVITY_PARAMETER(eyeOpenSensitivity, setEyeOpenSensitivity,
+                                 eyeOpen, parameters.blink, value,
+                                 parameters.mouthOpen, parameters.mouthSmile,
+                                 parameters.brow)
+VTS_DEFINE_SENSITIVITY_PARAMETER(mouthOpenSensitivity, setMouthOpenSensitivity,
+                                 mouthOpen, parameters.blink,
+                                 parameters.eyeOpen, value,
+                                 parameters.mouthSmile, parameters.brow)
+VTS_DEFINE_SENSITIVITY_PARAMETER(mouthSmileSensitivity,
+                                 setMouthSmileSensitivity, mouthSmile,
+                                 parameters.blink, parameters.eyeOpen,
+                                 parameters.mouthOpen, value, parameters.brow)
+VTS_DEFINE_SENSITIVITY_PARAMETER(browSensitivity, setBrowSensitivity, brow,
+                                 parameters.blink, parameters.eyeOpen,
+                                 parameters.mouthOpen, parameters.mouthSmile,
+                                 value)
 
-void VTSController::setIncludeARKitAliases(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->includeARKitAliases == enabled) {
-            return;
-        }
-        d->includeARKitAliases = enabled;
-    }
-    stopVTSClient();
-    saveSettings();
-    emit includeARKitAliasesChanged();
-}
-
-bool VTSController::includeACVABlendshapeParameters() const {
-    return snapshotSettings(d.get()).includeACVABlendshapeParameters;
-}
-
-void VTSController::setIncludeACVABlendshapeParameters(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->includeACVABlendshapeParameters == enabled) {
-            return;
-        }
-        d->includeACVABlendshapeParameters = enabled;
-    }
-    stopVTSClient();
-    saveSettings();
-    emit includeACVABlendshapeParametersChanged();
-}
-
-bool VTSController::mirrorPreview() const {
-    return snapshotSettings(d.get()).mirrorPreview;
-}
-
-void VTSController::setMirrorPreview(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->mirrorPreview == enabled) {
-            return;
-        }
-        d->mirrorPreview = enabled;
-    }
-    saveSettings();
-    emit mirrorPreviewChanged();
-}
-
-bool VTSController::showCameraPreview() const {
-    return snapshotSettings(d.get()).showCameraPreview;
-}
-
-void VTSController::setShowCameraPreview(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->showCameraPreview == enabled) {
-            return;
-        }
-        d->showCameraPreview = enabled;
-    }
-    saveSettings();
-    emit showCameraPreviewChanged();
-}
-
-bool VTSController::flipLandmarkY() const {
-    return snapshotSettings(d.get()).flipLandmarkY;
-}
-
-void VTSController::setFlipLandmarkY(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->flipLandmarkY == enabled) {
-            return;
-        }
-        d->flipLandmarkY = enabled;
-    }
-    saveSettings();
-    emit flipLandmarkYChanged();
-}
-
-bool VTSController::topLeftOrigin() const {
-    return snapshotSettings(d.get()).topLeftOrigin;
-}
-
-void VTSController::setTopLeftOrigin(bool enabled) {
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (d->topLeftOrigin == enabled) {
-            return;
-        }
-        d->topLeftOrigin = enabled;
-    }
-    saveSettings();
-    emit topLeftOriginChanged();
-}
-
-double VTSController::oneEuroMinCutoff() const {
-    return snapshotSettings(d.get()).oneEuroParameters.min_cutoff;
-}
-
-void VTSController::setOneEuroMinCutoff(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applyOneEuroParameters(value, settings.oneEuroParameters.beta,
-                           settings.oneEuroParameters.derivative_cutoff);
-}
-
-double VTSController::oneEuroBeta() const {
-    return snapshotSettings(d.get()).oneEuroParameters.beta;
-}
-
-void VTSController::setOneEuroBeta(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applyOneEuroParameters(settings.oneEuroParameters.min_cutoff, value,
-                           settings.oneEuroParameters.derivative_cutoff);
-}
-
-double VTSController::oneEuroDerivativeCutoff() const {
-    return snapshotSettings(d.get()).oneEuroParameters.derivative_cutoff;
-}
-
-void VTSController::setOneEuroDerivativeCutoff(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applyOneEuroParameters(settings.oneEuroParameters.min_cutoff,
-                           settings.oneEuroParameters.beta, value);
-}
-
-double VTSController::blinkSensitivity() const {
-    return snapshotSettings(d.get()).sensitivityParameters.blink;
-}
-
-void VTSController::setBlinkSensitivity(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applySensitivityParameters(value, settings.sensitivityParameters.eyeOpen,
-                               settings.sensitivityParameters.mouthOpen,
-                               settings.sensitivityParameters.mouthSmile,
-                               settings.sensitivityParameters.brow);
-}
-
-double VTSController::eyeOpenSensitivity() const {
-    return snapshotSettings(d.get()).sensitivityParameters.eyeOpen;
-}
-
-void VTSController::setEyeOpenSensitivity(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applySensitivityParameters(settings.sensitivityParameters.blink, value,
-                               settings.sensitivityParameters.mouthOpen,
-                               settings.sensitivityParameters.mouthSmile,
-                               settings.sensitivityParameters.brow);
-}
-
-double VTSController::mouthOpenSensitivity() const {
-    return snapshotSettings(d.get()).sensitivityParameters.mouthOpen;
-}
-
-void VTSController::setMouthOpenSensitivity(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applySensitivityParameters(settings.sensitivityParameters.blink,
-                               settings.sensitivityParameters.eyeOpen, value,
-                               settings.sensitivityParameters.mouthSmile,
-                               settings.sensitivityParameters.brow);
-}
-
-double VTSController::mouthSmileSensitivity() const {
-    return snapshotSettings(d.get()).sensitivityParameters.mouthSmile;
-}
-
-void VTSController::setMouthSmileSensitivity(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applySensitivityParameters(settings.sensitivityParameters.blink,
-                               settings.sensitivityParameters.eyeOpen,
-                               settings.sensitivityParameters.mouthOpen, value,
-                               settings.sensitivityParameters.brow);
-}
-
-double VTSController::browSensitivity() const {
-    return snapshotSettings(d.get()).sensitivityParameters.brow;
-}
-
-void VTSController::setBrowSensitivity(double value) {
-    SettingsSnapshot settings = snapshotSettings(d.get());
-    applySensitivityParameters(settings.sensitivityParameters.blink,
-                               settings.sensitivityParameters.eyeOpen,
-                               settings.sensitivityParameters.mouthOpen,
-                               settings.sensitivityParameters.mouthSmile,
-                               value);
-}
+#undef VTS_DEFINE_SENSITIVITY_PARAMETER
+#undef VTS_DEFINE_ONE_EURO_PARAMETER
+#undef VTS_DEFINE_BOOL_SETTING
+#undef VTS_DEFINE_SETTING_GETTER
 
 QString VTSController::message() const { return d->message; }
 
@@ -1185,17 +1084,12 @@ void VTSController::applyOneEuroParameters(double minCutoff, double beta,
                      kOneEuroDerivativeCutoffMaximum));
     parameters = AppleCVAOneEuroParametersSanitize(parameters);
 
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (std::memcmp(&d->oneEuroParameters, &parameters,
-                        sizeof(parameters)) == 0) {
-            return;
-        }
-        d->oneEuroParameters = parameters;
+    if (!updatePodSetting(d.get(), &VTSController::Impl::oneEuroParameters,
+                          parameters)) {
+        return;
     }
-    const SettingsSnapshot settings = snapshotSettings(d.get());
     if (d->pipeline != nil) {
-        d->pipeline.oneEuroParameters = settings.oneEuroParameters;
+        d->pipeline.oneEuroParameters = parameters;
     }
     saveSettings();
     emit oneEuroParametersChanged();
@@ -1217,13 +1111,9 @@ void VTSController::applySensitivityParameters(double blink, double eyeOpen,
         clamp_double(brow, kSensitivityMinimum, kSensitivityMaximum));
     parameters = VTSAppleCVASensitivityParametersSanitize(parameters);
 
-    {
-        std::lock_guard<std::mutex> lock(d->settingsMutex);
-        if (std::memcmp(&d->sensitivityParameters, &parameters,
-                        sizeof(parameters)) == 0) {
-            return;
-        }
-        d->sensitivityParameters = parameters;
+    if (!updatePodSetting(d.get(), &VTSController::Impl::sensitivityParameters,
+                          parameters)) {
+        return;
     }
     saveSettings();
     emit sensitivityParametersChanged();
